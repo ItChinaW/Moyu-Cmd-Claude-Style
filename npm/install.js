@@ -9,21 +9,22 @@ const https = require("https");
 const pkg = require("./package.json");
 const REPO = "ItChinaW/Moyu-Cmd-Claude-Style";
 
-// Map node platform/arch -> release asset suffix (must match release.yml asset names).
-const PLATFORM = { darwin: "darwin", win32: "win32", linux: "linux" }[process.platform];
-const ARCH = { arm64: "arm64", x64: "x64" }[process.arch];
-
-if (!PLATFORM || !ARCH) {
+// Pick the release asset for this platform. macOS = one universal binary (Intel + M),
+// Windows = x64 exe. (Linux 用户请用 cargo install 自行编译。)
+const isWin = process.platform === "win32";
+let asset;
+if (process.platform === "darwin") {
+  asset = "moyu-darwin-universal";
+} else if (isWin && process.arch === "x64") {
+  asset = "moyu-win32-x64.exe";
+} else {
   console.error(
-    `moyu: 暂不支持的平台 ${process.platform}/${process.arch}。` +
+    `moyu: 暂未提供 ${process.platform}/${process.arch} 的预编译包。` +
       `\n可从 https://github.com/${REPO}/releases 手动下载,或用 cargo install --git https://github.com/${REPO} 自行编译。`
   );
   process.exit(0); // don't hard-fail the whole npm install
 }
 
-const isWin = process.platform === "win32";
-const assetExt = isWin ? ".exe" : "";
-const asset = `moyu-${PLATFORM}-${ARCH}${assetExt}`;
 const url = `https://github.com/${REPO}/releases/download/v${pkg.version}/${asset}`;
 
 const outDir = path.join(__dirname, "bin");

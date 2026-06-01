@@ -1,7 +1,7 @@
 name: release
 
-# 打一个 v 开头的 tag 就会触发:建 Release → 各平台原生编译并上传二进制 →(可选)发布到 npm。
-#   git tag v0.1.0 && git push origin v0.1.0
+# 打一个 v 开头的 tag 就会触发:建 Release → 编译 Windows + macOS 二进制并上传 →(可选)发布到 npm。
+#   git tag v0.1.1 && git push origin v0.1.1
 on:
   push:
     tags: ["v*"]
@@ -10,61 +10,63 @@ permissions:
   contents: write
 
 jobs:
-  # 先建好 Release(只建一次,避免多个编译任务并发创建时的竞争冲突)
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Create release if missing
+      - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || \
-          gh release create "$TAG" --repo "$REPO" --title "$TAG" \
-            --notes "自动构建的跨平台二进制。安装方式见 使用说明.md,或 npm i -g moyu-cli。"
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "Windows 与 macOS 二进制。安装见 使用说明.md,或 npm i -g moyu-fish。"
 
-  build:
-    name: build ${{ matrix.asset }}
+  build-macos:
+    name: build macOS (universal)
     needs: create-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-            asset: moyu-darwin-arm64
-          - os: macos-14
-            target: x86_64-apple-darwin
-            asset: moyu-darwin-x64
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            asset: moyu-linux-x64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset: moyu-win32-x64.exe
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build both arches
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+      - name: Make universal binary
+        run: |
+          lipo -create -output moyu-darwin-universal \
+            target/aarch64-apple-darwin/release/moyu \
+            target/x86_64-apple-darwin/release/moyu
+          lipo -archs moyu-darwin-universal
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" moyu-darwin-universal --repo "${{ github.repository }}" --clobber
+
+  build-windows:
+    name: build Windows (x64)
+    needs: create-release
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Stage binary (unix)
-        if: runner.os != 'Windows'
-        run: cp "target/${{ matrix.target }}/release/moyu" "${{ matrix.asset }}"
-      - name: Stage binary (windows)
-        if: runner.os == 'Windows'
-        run: copy "target\${{ matrix.target }}\release\moyu.exe" "${{ matrix.asset }}"
-      - name: Upload to release
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Stage
+        run: copy "target\x86_64-pc-windows-msvc\release\moyu.exe" "moyu-win32-x64.exe"
+      - name: Upload
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --repo "${{ github.repository }}" --clobber
+        run: gh release upload "${{ github.ref_name }}" "moyu-win32-x64.exe" --repo "${{ github.repository }}" --clobber
 
   publish-npm:
     name: publish to npm
-    needs: build
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +80,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN 未设置,跳过 npm 发布(在仓库 Settings → Secrets 添加 NPM_TOKEN 即可自动发布)。"
+            echo "NPM_TOKEN 未设置,跳过 npm 发布。"
             exit 0
           fi
           npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
