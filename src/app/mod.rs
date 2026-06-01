@@ -28,6 +28,8 @@ pub struct App {
     pub list_source: ListSource,
     /// Boss key: when true the UI shows an innocuous fake screen and swallows input.
     pub boss_mode: bool,
+    /// Camouflage: interleave dim Claude-Code-style decoy lines into the answer body.
+    pub camouflage: bool,
 }
 
 impl App {
@@ -41,6 +43,7 @@ impl App {
             should_quit: false, cookie: String::new(),
             list_source: ListSource::Recommend,
             boss_mode: false,
+            camouflage: true,
         }
     }
 

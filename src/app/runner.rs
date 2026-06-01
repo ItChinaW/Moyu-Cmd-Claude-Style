@@ -200,6 +200,8 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 } else if c == 'p' {
                     app.detail_idx = app.detail_idx.saturating_sub(1);
                     app.detail_scroll = 0;
+                } else if c == 'c' {
+                    app.camouflage = !app.camouflage;
                 } else if let Some(url) = image_for_digit(app.current_detail(), c) {
                     open_url(&url);
                 }
@@ -353,6 +355,22 @@ mod tests {
         assert!(app.boss_mode, "backtick should enable boss mode");
         handle_key(&mut app, KeyCode::Char('`'), &tx);
         assert!(!app.boss_mode, "backtick again should disable it");
+    }
+
+    #[test]
+    fn c_key_toggles_camouflage_on_detail() {
+        let mut app = App::new();
+        app.details = vec![DetailView {
+            author: "a".into(), voteup: 1, body: "b".into(),
+            images: vec![], answer_id: "9".into(),
+        }];
+        app.push(Screen::Detail);
+        let (tx, _rx) = make_channel();
+        assert!(app.camouflage, "camouflage on by default");
+        handle_key(&mut app, KeyCode::Char('c'), &tx);
+        assert!(!app.camouflage, "c should toggle camouflage off");
+        handle_key(&mut app, KeyCode::Char('c'), &tx);
+        assert!(app.camouflage, "c again should toggle it back on");
     }
 
     #[test]

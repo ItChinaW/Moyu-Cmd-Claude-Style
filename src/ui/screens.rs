@@ -63,12 +63,57 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(List::new(items), area);
 }
 
+/// Dim Claude-Code-style decoy lines interleaved between answer paragraphs.
+/// Uses the user's real project filenames so a passing glance reads as coding.
+const DECOYS: &[&str] = &[
+    "⏺ Read app/admin/personal/profile/page.tsx (142 lines)",
+    "    export default function ProfilePage() {",
+    "⏺ Update components/ModelPriceFormBlocks.tsx",
+    "    +   const [loading, setLoading] = useState(false)",
+    "● Bash(pnpm typecheck)  ⎿  0 errors, 0 warnings",
+    "⏺ Edit components/ModelIconPickerModal.tsx",
+    "    -   onClose={() => setOpen(false)}",
+    "    return <ProfileForm onSubmit={handleSubmit} />",
+    "⏺ Wrote app/admin/users/route.ts (28 lines)",
+    "    await db.user.update({ where: { id }, data })",
+    "● Search(useEffect dependency array)  ⎿  3 matches",
+    "    const handleSubmit = useCallback(async () => {",
+];
+
 fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
     let body = match app.current_detail() {
         Some(d) => format!("{} · 赞{}\n\n{}", d.author, d.voteup, d.body),
         None => "(无内容)".to_string(),
     };
-    let p = Paragraph::new(body)
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut lines: Vec<Line> = Vec::new();
+    if app.camouflage {
+        // Real text in default color (readable); at each paragraph break drop in a
+        // dim decoy code line. Deterministic rotation keeps decoys stable on redraw.
+        let mut decoy_i = 0usize;
+        let mut prev_blank = true; // suppress a leading decoy
+        for src in body.split('\n') {
+            if src.is_empty() {
+                if !prev_blank {
+                    lines.push(Line::from(Span::styled(
+                        DECOYS[decoy_i % DECOYS.len()].to_string(),
+                        dim,
+                    )));
+                    decoy_i += 1;
+                }
+                lines.push(Line::from(""));
+                prev_blank = true;
+            } else {
+                lines.push(Line::from(src.to_string()));
+                prev_blank = false;
+            }
+        }
+    } else {
+        for src in body.split('\n') {
+            lines.push(Line::from(src.to_string()));
+        }
+    }
+    let p = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((app.detail_scroll, 0));
     f.render_widget(p, area);
@@ -134,7 +179,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
             let load = if app.loading { " (加载中…)" } else { "" };
             format!("{feed}{load}   ↑↓选择 Enter进入 r刷新 /hot /search ←返回 q退出")
         }
-        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 →评论 ←返回".to_string(),
+        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 c伪装 →评论 ←返回".to_string(),
         Screen::Comments => "↑↓滚动 ←返回".to_string(),
     };
     let cmd_line = if let Some(e) = &app.error {
