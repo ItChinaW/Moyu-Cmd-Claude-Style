@@ -10,6 +10,7 @@ pub fn parse(line: &str) -> Command {
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
+        "/help" | "/?" | "/h" => Command::Help,
         "/back" => Command::Back,
         "/quit" => Command::Quit,
         "/search" if !rest.is_empty() => Command::Search(rest.to_string()),
@@ -24,6 +25,7 @@ pub enum Command {
     Refresh,
     Search(String),
     Login,
+    Help,
     Back,
     Quit,
     Unknown(String),
@@ -39,6 +41,8 @@ mod tests {
         assert_eq!(parse("/hot"), Command::Hot);
         assert_eq!(parse("/refresh"), Command::Refresh);
         assert_eq!(parse("/login"), Command::Login);
+        assert_eq!(parse("/help"), Command::Help);
+        assert_eq!(parse("/?"), Command::Help);
         assert_eq!(parse("/back"), Command::Back);
         assert_eq!(parse("/quit"), Command::Quit);
         assert_eq!(parse("/search 程序员 摸鱼"), Command::Search("程序员 摸鱼".into()));

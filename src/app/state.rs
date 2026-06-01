@@ -5,6 +5,7 @@ pub enum Screen {
     List,     // hot list or search results
     Detail,
     Comments,
+    Help,
 }
 
 #[cfg(test)]

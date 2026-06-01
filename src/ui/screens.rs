@@ -1,4 +1,4 @@
-use crate::app::{App, ListSource};
+use crate::app::App;
 use crate::app::state::Screen;
 use ratatui::{
     Frame,
@@ -15,7 +15,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(f.area());
     match app.screen() {
         Screen::Root => draw_root(f, chunks[0]),
@@ -23,6 +23,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::List => draw_list(f, chunks[0], app),
         Screen::Detail => draw_detail(f, chunks[0], app),
         Screen::Comments => draw_comments(f, chunks[0], app),
+        Screen::Help => draw_help(f, chunks[0]),
     }
     draw_command_bar(f, chunks[1], app);
 }
@@ -166,30 +167,53 @@ fn draw_boss(f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
+/// Low-key bottom prompt — looks like a shell line. All commands/keys live in /help.
 fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
-    let hint = match app.screen() {
-        Screen::Root => "/zhihu 进入知乎   /quit 退出".to_string(),
-        Screen::Login => "粘贴 Cookie 后回车   Esc 返回".to_string(),
-        Screen::List => {
-            let feed = match &app.list_source {
-                ListSource::Recommend => "推荐".to_string(),
-                ListSource::Hot => "热榜".to_string(),
-                ListSource::Search(q) => format!("搜索:{q}"),
-            };
-            let load = if app.loading { " (加载中…)" } else { "" };
-            format!("{feed}{load}   ↑↓选择 Enter进入 r刷新 /hot /search ←返回 q退出")
-        }
-        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 c伪装 →评论 ←返回".to_string(),
-        Screen::Comments => "↑↓滚动 ←返回".to_string(),
-    };
-    let cmd_line = if let Some(e) = &app.error {
+    let line = if let Some(e) = &app.error {
         Line::from(Span::styled(format!("> {e}"), Style::default().fg(Color::Red)))
+    } else if app.loading {
+        Line::from(Span::styled("> …".to_string(), Style::default().fg(Color::DarkGray)))
     } else {
         Line::from(format!("> {}", app.command))
     };
-    let text = vec![
-        Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
-        cmd_line,
+    f.render_widget(Paragraph::new(line), area);
+}
+
+/// Full command + keybinding reference, opened with /help.
+fn draw_help(f: &mut Frame, area: Rect) {
+    let head = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let key = Style::default().fg(Color::Yellow);
+    let dim = Style::default().fg(Color::DarkGray);
+    let kv = |k: &str, v: &str| Line::from(vec![
+        Span::styled(format!("  {k:<14}"), key),
+        Span::raw(v.to_string()),
+    ]);
+    let lines = vec![
+        Line::from(Span::styled("touch-fish · 帮助", head)),
+        Line::from(""),
+        Line::from(Span::styled(" 命令(在 > 后输入)", head)),
+        kv("/zhihu", "进入知乎(推荐流·最新)"),
+        kv("/hot", "热榜"),
+        kv("/search 词", "搜索"),
+        kv("/refresh", "刷新当前列表(也可按 r)"),
+        kv("/login", "重新登录 / 切换账号(粘贴新 Cookie)"),
+        kv("/help", "显示本帮助(/? 亦可)"),
+        kv("/back", "返回上一级"),
+        kv("/quit", "退出"),
+        Line::from(""),
+        Line::from(Span::styled(" 按键", head)),
+        kv("↑ ↓", "选择 / 滚动"),
+        kv("Enter", "进入选中项 / 执行命令"),
+        kv("→ 或 Tab", "看评论(详情页)"),
+        kv("← 或 Esc", "返回上一级"),
+        kv("n / p", "上 / 下一个回答(详情页)"),
+        kv("1-9", "在浏览器打开第 N 张图(详情页)"),
+        kv("c", "开关 Claude 伪装(详情页)"),
+        kv("r", "刷新(列表页)"),
+        kv("q", "退出"),
+        kv("`", "老板键:一键隐藏 / 恢复"),
+        Line::from(""),
+        Line::from(Span::styled(" 按 ← 或 Esc 返回", dim)),
     ];
-    f.render_widget(Paragraph::new(text), area);
+    f.render_widget(Paragraph::new(lines), area);
 }

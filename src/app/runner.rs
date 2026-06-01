@@ -318,6 +318,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
             let _ = req_tx.send(Request::Search(q));
         }
         Command::Login => { app.error = None; app.replace(Screen::Login); }
+        Command::Help => { if *app.screen() != Screen::Help { app.push(Screen::Help); } }
         Command::Back => app.back(),
         Command::Quit => app.should_quit = true,
         Command::Unknown(s) => app.error = Some(format!("未知命令: {s}")),
