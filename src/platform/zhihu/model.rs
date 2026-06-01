@@ -34,6 +34,45 @@ pub struct LinkArea {
     pub url: String,
 }
 
+// ---------- Recommend feed ----------
+// GET /api/v3/feed/topstory/recommend
+// data[].target = answer | article
+//   answer: { type:"answer", question:{id:String, title}, excerpt, author:{name}, voteup_count }
+//   article: { type:"article", title, excerpt }
+#[derive(Debug, Deserialize)]
+pub struct RecommendResponse {
+    pub data: Vec<RecommendItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecommendItem {
+    pub target: RecommendTarget,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct RecommendTarget {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    /// Populated for articles.
+    #[serde(default)]
+    pub title: String,
+    /// Populated for answers and articles.
+    #[serde(default)]
+    pub excerpt: String,
+    /// Populated for answers; contains the question title and id.
+    #[serde(default)]
+    pub question: Option<RecommendQuestion>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecommendQuestion {
+    /// Numeric string (e.g. "665563068").
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+}
+
 // ---------- Search ----------
 // data[] = { type:"search_result"|"hot_timing"|..., highlight:{title}?, object:{...}? }
 // only type=="search_result" carries a real answer object.
@@ -135,6 +174,18 @@ pub struct CommentAuthor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_recommend() {
+        let raw = include_str!("../../../tests/fixtures/recommend.json");
+        let r: RecommendResponse = serde_json::from_str(raw).expect("parse recommend");
+        assert!(!r.data.is_empty(), "recommend must have items");
+        let first_answer = r.data.iter().find(|it| it.target.kind == "answer")
+            .expect("at least one answer item");
+        let q = first_answer.target.question.as_ref().expect("answer must have a question");
+        assert!(!q.title.is_empty(), "question must have a title");
+        assert!(!q.id.is_empty(), "question must have an id");
+    }
 
     #[test]
     fn parses_hot_list() {

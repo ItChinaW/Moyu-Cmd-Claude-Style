@@ -67,6 +67,29 @@ impl ZhihuClient {
         }).collect())
     }
 
+    pub async fn recommend(&self) -> Result<Vec<ListEntry>> {
+        let body = self.get("/api/v3/feed/topstory/recommend?action=down&ad_interval=-1&desktop=true").await?;
+        let resp: model::RecommendResponse = serde_json::from_str(&body)?;
+        Ok(resp.data.into_iter().filter_map(|item| {
+            let target = item.target;
+            match target.kind.as_str() {
+                "answer" => {
+                    let q = target.question?;
+                    let title = q.title;
+                    if title.is_empty() { return None; }
+                    let question_id = if q.id.is_empty() { None } else { Some(q.id) };
+                    Some(ListEntry { title, subtitle: target.excerpt, question_id })
+                }
+                "article" => {
+                    let title = target.title;
+                    if title.is_empty() { return None; }
+                    Some(ListEntry { title, subtitle: target.excerpt, question_id: None })
+                }
+                _ => None,
+            }
+        }).collect())
+    }
+
     pub async fn comments(&self, answer_id: &str) -> Result<Vec<CommentView>> {
         let path = format!(
             "/api/v4/comment_v5/answers/{answer_id}/root_comment?order_by=score&limit=100"
@@ -143,6 +166,18 @@ mod tests {
             assert!(!a.answer_id.is_empty());
             let comments = client.comments(&a.answer_id).await.expect("comments");
             eprintln!("got {} comments for answer {}", comments.len(), a.answer_id);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "live network; run with --ignored"]
+    async fn live_recommend() {
+        let Some(cookie) = live_cookie() else { eprintln!("skip: no cookie"); return; };
+        let client = ZhihuClient::new(cookie).expect("client");
+        let results = client.recommend().await.expect("recommend");
+        assert!(!results.is_empty(), "recommend should return entries");
+        for e in &results {
+            eprintln!("recommend: {} (qid={:?})", e.title, e.question_id);
         }
     }
 

@@ -7,6 +7,8 @@ pub fn parse(line: &str) -> Command {
     };
     match head {
         "/zhihu" => Command::Zhihu,
+        "/hot" => Command::Hot,
+        "/refresh" => Command::Refresh,
         "/login" => Command::Login,
         "/back" => Command::Back,
         "/quit" => Command::Quit,
@@ -18,6 +20,8 @@ pub fn parse(line: &str) -> Command {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Zhihu,
+    Hot,
+    Refresh,
     Search(String),
     Login,
     Back,
@@ -32,6 +36,8 @@ mod tests {
     #[test]
     fn parses_known_commands() {
         assert_eq!(parse("/zhihu"), Command::Zhihu);
+        assert_eq!(parse("/hot"), Command::Hot);
+        assert_eq!(parse("/refresh"), Command::Refresh);
         assert_eq!(parse("/login"), Command::Login);
         assert_eq!(parse("/back"), Command::Back);
         assert_eq!(parse("/quit"), Command::Quit);

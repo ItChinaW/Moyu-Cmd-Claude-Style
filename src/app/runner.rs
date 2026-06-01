@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::app::App;
+use crate::app::{App, ListSource};
 use crate::app::command::{self, Command};
 use crate::app::state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 #[derive(Debug)]
 pub enum Request {
     Connect(String),     // cookie
+    Recommend,
     HotList,
     Search(String),
     Answers(String),     // question id
@@ -46,11 +47,16 @@ fn spawn_worker(mut rx: mpsc::UnboundedReceiver<Request>, tx: mpsc::UnboundedSen
 async fn handle(client: &mut Option<ZhihuClient>, req: Request) -> Update {
     match req {
         Request::Connect(cookie) => match ZhihuClient::new(cookie.clone()) {
-            Ok(c) => match c.hot_list().await {
+            Ok(c) => match c.recommend().await {
                 Ok(list) => { *client = Some(c); Update::Connected { cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             },
             Err(e) => Update::ConnectFailed(e.to_string()),
+        },
+        Request::Recommend => match client {
+            Some(c) => match c.recommend().await {
+                Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+            None => Update::Error("未登录".into()),
         },
         Request::HotList => match client {
             Some(c) => match c.hot_list().await {
@@ -174,6 +180,10 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 app.command.push(c);
             } else if c == 'q' {
                 app.should_quit = true;
+            } else if c == 'r' && *app.screen() == Screen::List {
+                if !app.cookie.is_empty() {
+                    refresh(app, req_tx);
+                }
             } else if *app.screen() == Screen::Detail {
                 if c == 'n' && app.detail_idx + 1 < app.details.len() {
                     app.detail_idx += 1;
@@ -235,17 +245,45 @@ fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
     }
 }
 
+fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
+    app.loading = true;
+    match &app.list_source.clone() {
+        ListSource::Recommend => { let _ = req_tx.send(Request::Recommend); }
+        ListSource::Hot => { let _ = req_tx.send(Request::HotList); }
+        ListSource::Search(q) => { let _ = req_tx.send(Request::Search(q.clone())); }
+    }
+}
+
 fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<Request>) {
     match cmd {
         Command::Zhihu => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);
             } else {
+                app.list_source = ListSource::Recommend;
+                app.loading = true;
+                let _ = req_tx.send(Request::Recommend);
+            }
+        }
+        Command::Hot => {
+            if app.cookie.is_empty() {
+                app.replace(Screen::Login);
+            } else {
+                app.list_source = ListSource::Hot;
                 app.loading = true;
                 let _ = req_tx.send(Request::HotList);
             }
         }
-        Command::Search(q) => { app.loading = true; let _ = req_tx.send(Request::Search(q)); }
+        Command::Refresh => {
+            if !app.cookie.is_empty() {
+                refresh(app, req_tx);
+            }
+        }
+        Command::Search(q) => {
+            app.list_source = ListSource::Search(q.clone());
+            app.loading = true;
+            let _ = req_tx.send(Request::Search(q));
+        }
         Command::Login => { app.error = None; app.replace(Screen::Login); }
         Command::Back => app.back(),
         Command::Quit => app.should_quit = true,
@@ -257,6 +295,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
 mod tests {
     use super::*;
     use crate::app::state::Screen;
+    use crate::app::{ListSource};
     use crate::app::command::Command;
     use crate::platform::{ListEntry, DetailView};
     use crossterm::event::KeyCode;
@@ -274,17 +313,32 @@ mod tests {
         mpsc::unbounded_channel::<Request>()
     }
 
-    // 1. dispatch_zhihu_with_cookie_requests_hotlist
+    // 1. dispatch_zhihu_with_cookie_requests_recommend
     #[test]
-    fn dispatch_zhihu_with_cookie_requests_hotlist() {
+    fn dispatch_zhihu_with_cookie_requests_recommend() {
         let mut app = App::new();
         app.cookie = "x".into();
         let (tx, mut rx) = make_channel();
         dispatch_command(&mut app, Command::Zhihu, &tx);
         match rx.try_recv() {
+            Ok(Request::Recommend) => {}
+            other => panic!("expected Recommend, got {:?}", other),
+        }
+        assert_eq!(app.list_source, ListSource::Recommend);
+    }
+
+    // 1b. dispatch_hot_with_cookie_requests_hotlist
+    #[test]
+    fn dispatch_hot_with_cookie_requests_hotlist() {
+        let mut app = App::new();
+        app.cookie = "x".into();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Hot, &tx);
+        match rx.try_recv() {
             Ok(Request::HotList) => {}
             other => panic!("expected HotList, got {:?}", other),
         }
+        assert_eq!(app.list_source, ListSource::Hot);
     }
 
     // 2. dispatch_zhihu_without_cookie_goes_to_login
@@ -339,10 +393,43 @@ mod tests {
         }
         handle_key(&mut app, KeyCode::Enter, &tx);
         match rx.try_recv() {
+            Ok(Request::Recommend) => {}
+            other => panic!("expected Recommend, got {:?}", other),
+        }
+        assert!(app.command.is_empty(), "command buffer should be cleared after dispatch");
+    }
+
+    // 6b. typing_hot_command_dispatches_hotlist
+    #[test]
+    fn typing_hot_command_dispatches_hotlist() {
+        let mut app = App::new();
+        app.cookie = "x".into();
+        let (tx, mut rx) = make_channel();
+        for c in "/hot".chars() {
+            handle_key(&mut app, KeyCode::Char(c), &tx);
+        }
+        handle_key(&mut app, KeyCode::Enter, &tx);
+        match rx.try_recv() {
             Ok(Request::HotList) => {}
             other => panic!("expected HotList, got {:?}", other),
         }
-        assert!(app.command.is_empty(), "command buffer should be cleared after dispatch");
+        assert!(app.command.is_empty());
+    }
+
+    // 6c. r_key_on_list_refreshes
+    #[test]
+    fn r_key_on_list_refreshes() {
+        let mut app = App::new();
+        app.cookie = "x".into();
+        app.list_source = ListSource::Recommend;
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        handle_key(&mut app, KeyCode::Char('r'), &tx);
+        match rx.try_recv() {
+            Ok(Request::Recommend) => {}
+            other => panic!("expected Recommend refresh, got {:?}", other),
+        }
+        assert!(app.loading);
     }
 
     // 7. q_on_root_quits_when_not_composing

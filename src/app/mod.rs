@@ -4,6 +4,13 @@ pub mod runner;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListSource {
+    Recommend,
+    Hot,
+    Search(String),
+}
+
 pub struct App {
     stack: Vec<Screen>,
     pub list: Vec<ListEntry>,
@@ -18,6 +25,7 @@ pub struct App {
     pub error: Option<String>,
     pub should_quit: bool,
     pub cookie: String,
+    pub list_source: ListSource,
 }
 
 impl App {
@@ -29,6 +37,7 @@ impl App {
             comments: Vec::new(), comment_scroll: 0,
             command: String::new(), loading: false, error: None,
             should_quit: false, cookie: String::new(),
+            list_source: ListSource::Recommend,
         }
     }
 

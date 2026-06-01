@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, ListSource};
 use crate::app::state::Screen;
 use ratatui::{
     Frame,
@@ -60,7 +60,16 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
         }
         ListItem::new(lines)
     }).collect();
-    let title = if app.loading { "加载中…" } else { "知乎" };
+    let feed_name = match &app.list_source {
+        ListSource::Recommend => "推荐".to_string(),
+        ListSource::Hot => "热榜".to_string(),
+        ListSource::Search(q) => format!("搜索: {q}"),
+    };
+    let title = if app.loading {
+        format!("{feed_name} (加载中…)")
+    } else {
+        feed_name
+    };
     f.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title(title)), area);
 }
 
@@ -105,7 +114,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
     let hint = match app.screen() {
         Screen::Root => "输入 /zhihu 进入知乎   /quit 退出",
         Screen::Login => "粘贴 Cookie 后回车   Esc 返回",
-        Screen::List => "↑↓选择 Enter进入 /search搜索 ←返回 q退出",
+        Screen::List => "↑↓选择 Enter进入 r刷新 /hot热榜 /search搜索 ←返回 q退出",
         Screen::Detail => "↑↓滚动 n/p切换回答 →/Tab看评论 ←返回",
         Screen::Comments => "↑↓滚动 ←返回",
     };
