@@ -1,4 +1,5 @@
 pub mod state;
+pub mod command;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
 
