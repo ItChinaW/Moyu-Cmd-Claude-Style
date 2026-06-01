@@ -1,6 +1,6 @@
 name: release
 
-# 打一个 v 开头的 tag 就会触发:各平台原生编译 → 上传到 GitHub Release →(可选)发布到 npm。
+# 打一个 v 开头的 tag 就会触发:建 Release → 各平台原生编译并上传二进制 →(可选)发布到 npm。
 #   git tag v0.1.0 && git push origin v0.1.0
 on:
   push:
@@ -10,8 +10,23 @@ permissions:
   contents: write
 
 jobs:
+  # 先建好 Release(只建一次,避免多个编译任务并发创建时的竞争冲突)
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || \
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" \
+            --notes "自动构建的跨平台二进制。安装方式见 使用说明.md,或 npm i -g moyu-cli。"
+
   build:
     name: build ${{ matrix.asset }}
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -19,7 +34,7 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             asset: moyu-darwin-arm64
-          - os: macos-13
+          - os: macos-14
             target: x86_64-apple-darwin
             asset: moyu-darwin-x64
           - os: ubuntu-latest
@@ -42,10 +57,10 @@ jobs:
       - name: Stage binary (windows)
         if: runner.os == 'Windows'
         run: copy "target\${{ matrix.target }}\release\moyu.exe" "${{ matrix.asset }}"
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.asset }}
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --repo "${{ github.repository }}" --clobber
 
   publish-npm:
     name: publish to npm
