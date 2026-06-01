@@ -5,13 +5,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph, Wrap},
 };
 
 pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
         .split(f.area());
     match app.screen() {
         Screen::Root => draw_root(f, chunks[0]),
@@ -24,22 +24,18 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_root(f: &mut Frame, area: Rect) {
-    let p = Paragraph::new("输入 /zhihu 进入知乎\n(以后: /tieba 进入贴吧)")
-        .block(Block::default().borders(Borders::ALL).title("touch-fish"));
-    f.render_widget(p, area);
+    f.render_widget(Paragraph::new("输入 /zhihu 进入知乎"), area);
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
     let msg = if let Some(e) = &app.error {
-        format!("登录失败: {e}\n\n请重新粘贴知乎 Cookie 后回车")
+        format!("登录失败: {e}\n请重新粘贴知乎 Cookie 后回车")
+    } else if app.loading {
+        "验证中…".to_string()
     } else {
-        "未检测到登录态。\n从浏览器 F12 → Network → 任意知乎请求复制 Cookie，\n粘贴到下方命令行后回车。".to_string()
+        "未检测到登录态。浏览器 F12 → Network → 任意知乎请求复制 Cookie，粘贴后回车。".to_string()
     };
-    let title = if app.loading { "验证中…" } else { "知乎登录" };
-    let p = Paragraph::new(msg)
-        .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL).title(title));
-    f.render_widget(p, area);
+    f.render_widget(Paragraph::new(msg).wrap(Wrap { trim: true }), area);
 }
 
 fn draw_list(f: &mut Frame, area: Rect, app: &App) {
@@ -60,28 +56,17 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
         }
         ListItem::new(lines)
     }).collect();
-    let feed_name = match &app.list_source {
-        ListSource::Recommend => "推荐".to_string(),
-        ListSource::Hot => "热榜".to_string(),
-        ListSource::Search(q) => format!("搜索: {q}"),
-    };
-    let title = if app.loading {
-        format!("{feed_name} (加载中…)")
-    } else {
-        feed_name
-    };
-    f.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title(title)), area);
+    f.render_widget(List::new(items), area);
 }
 
 fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
-    let (title, body) = match app.current_detail() {
-        Some(d) => (format!("{} · 赞{}", d.author, d.voteup), d.body.clone()),
-        None => ("详情".to_string(), "(无内容)".to_string()),
+    let body = match app.current_detail() {
+        Some(d) => format!("{} · 赞{}\n\n{}", d.author, d.voteup, d.body),
+        None => "(无内容)".to_string(),
     };
     let p = Paragraph::new(body)
         .wrap(Wrap { trim: false })
-        .scroll((app.detail_scroll, 0))
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .scroll((app.detail_scroll, 0));
     f.render_widget(p, area);
 }
 
@@ -100,26 +85,34 @@ fn draw_comments(f: &mut Frame, area: Rect, app: &App) {
     }).collect();
     let p = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .scroll((app.comment_scroll, 0))
-        .block(Block::default().borders(Borders::ALL).title("评论"));
+        .scroll((app.comment_scroll, 0));
     f.render_widget(p, area);
 }
 
 fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
-    let line = if let Some(e) = &app.error {
-        Line::from(Span::styled(format!(" {e} "), Style::default().fg(Color::Red)))
+    let hint = match app.screen() {
+        Screen::Root => "/zhihu 进入知乎   /quit 退出".to_string(),
+        Screen::Login => "粘贴 Cookie 后回车   Esc 返回".to_string(),
+        Screen::List => {
+            let feed = match &app.list_source {
+                ListSource::Recommend => "推荐".to_string(),
+                ListSource::Hot => "热榜".to_string(),
+                ListSource::Search(q) => format!("搜索:{q}"),
+            };
+            let load = if app.loading { " (加载中…)" } else { "" };
+            format!("{feed}{load}   ↑↓选择 Enter进入 r刷新 /hot /search ←返回 q退出")
+        }
+        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 →评论 ←返回".to_string(),
+        Screen::Comments => "↑↓滚动 ←返回".to_string(),
+    };
+    let cmd_line = if let Some(e) = &app.error {
+        Line::from(Span::styled(format!("> {e}"), Style::default().fg(Color::Red)))
     } else {
         Line::from(format!("> {}", app.command))
     };
-    let hint = match app.screen() {
-        Screen::Root => "输入 /zhihu 进入知乎   /quit 退出",
-        Screen::Login => "粘贴 Cookie 后回车   Esc 返回",
-        Screen::List => "↑↓选择 Enter进入 r刷新 /hot热榜 /search搜索 ←返回 q退出",
-        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 →/Tab评论 ←返回",
-        Screen::Comments => "↑↓滚动 ←返回",
-    };
-    f.render_widget(
-        Paragraph::new(line).block(Block::default().borders(Borders::ALL).title(hint)),
-        area,
-    );
+    let text = vec![
+        Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+        cmd_line,
+    ];
+    f.render_widget(Paragraph::new(text), area);
 }
