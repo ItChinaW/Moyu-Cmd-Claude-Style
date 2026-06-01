@@ -59,11 +59,21 @@ impl ZhihuClient {
         );
         let body = self.get(&path).await?;
         let resp: model::AnswersResponse = serde_json::from_str(&body)?;
-        Ok(resp.data.into_iter().map(|f| DetailView {
-            author: f.target.author.name,
-            voteup: f.target.voteup_count,
-            body: html::to_text(&f.target.content),
-            answer_id: f.target.id,
+        Ok(resp.data.into_iter().map(|f| {
+            let (mut body, images) = html::to_text_and_images(&f.target.content);
+            if !images.is_empty() {
+                body.push_str("\n\n──── 图片(按数字键在浏览器打开)────\n");
+                for (i, u) in images.iter().enumerate() {
+                    body.push_str(&format!("【图{}】 {}\n", i + 1, u));
+                }
+            }
+            DetailView {
+                author: f.target.author.name,
+                voteup: f.target.voteup_count,
+                body,
+                images,
+                answer_id: f.target.id,
+            }
         }).collect())
     }
 
@@ -162,6 +172,11 @@ mod tests {
         let qid = hot.iter().find_map(|e| e.question_id.clone()).expect("a question id in hot list");
         let answers = client.answers(&qid).await.expect("answers");
         eprintln!("got {} answers for q{}", answers.len(), qid);
+        for (i, a) in answers.iter().enumerate() {
+            if !a.images.is_empty() {
+                eprintln!("answer[{}] has {} image(s): {:?}", i, a.images.len(), &a.images[..a.images.len().min(2)]);
+            }
+        }
         if let Some(a) = answers.first() {
             assert!(!a.answer_id.is_empty());
             let comments = client.comments(&a.answer_id).await.expect("comments");

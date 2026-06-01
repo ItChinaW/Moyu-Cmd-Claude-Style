@@ -191,6 +191,8 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 } else if c == 'p' {
                     app.detail_idx = app.detail_idx.saturating_sub(1);
                     app.detail_scroll = 0;
+                } else if let Some(url) = image_for_digit(app.current_detail(), c) {
+                    open_url(&url);
                 }
             }
         }
@@ -233,6 +235,26 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         }
         _ => {}
     }
+}
+
+fn open_url(url: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
+}
+
+/// Pure helper: given the current detail view and a digit character, return the
+/// corresponding image URL (1-based). Returns None for non-digit chars, '0', or
+/// out-of-range indices.
+fn image_for_digit(detail: Option<&DetailView>, c: char) -> Option<String> {
+    let d = c.to_digit(10)?;
+    if d < 1 {
+        return None;
+    }
+    detail?.images.get((d - 1) as usize).cloned()
 }
 
 fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
@@ -484,10 +506,29 @@ mod tests {
             author: "a".into(),
             voteup: 1,
             body: "b".into(),
+            images: vec![],
             answer_id: "9".into(),
         }]));
         assert_eq!(app.screen(), &Screen::Detail);
         assert!(app.current_detail().is_some());
+    }
+
+    // 13. image_for_digit returns correct url
+    #[test]
+    fn image_for_digit_returns_correct_url() {
+        let dv = DetailView {
+            author: "a".into(),
+            voteup: 0,
+            body: "b".into(),
+            images: vec!["u1".into(), "u2".into()],
+            answer_id: "1".into(),
+        };
+        assert_eq!(image_for_digit(Some(&dv), '1'), Some("u1".into()));
+        assert_eq!(image_for_digit(Some(&dv), '2'), Some("u2".into()));
+        assert_eq!(image_for_digit(Some(&dv), '3'), None);
+        assert_eq!(image_for_digit(Some(&dv), '0'), None);
+        assert_eq!(image_for_digit(Some(&dv), 'x'), None);
+        assert_eq!(image_for_digit(None, '1'), None);
     }
 
     // 12. apply_error_update_sets_error_without_navigating

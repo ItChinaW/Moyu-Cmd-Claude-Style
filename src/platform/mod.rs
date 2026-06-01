@@ -14,6 +14,7 @@ pub struct DetailView {
     pub author: String,
     pub voteup: i64,
     pub body: String,      // already HTML-converted to text
+    pub images: Vec<String>, // ordered image URLs extracted from the answer
     pub answer_id: String,
 }
 

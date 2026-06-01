@@ -115,7 +115,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
         Screen::Root => "输入 /zhihu 进入知乎   /quit 退出",
         Screen::Login => "粘贴 Cookie 后回车   Esc 返回",
         Screen::List => "↑↓选择 Enter进入 r刷新 /hot热榜 /search搜索 ←返回 q退出",
-        Screen::Detail => "↑↓滚动 n/p切换回答 →/Tab看评论 ←返回",
+        Screen::Detail => "↑↓滚动 n/p切换回答 数字键开图 →/Tab评论 ←返回",
         Screen::Comments => "↑↓滚动 ←返回",
     };
     f.render_widget(
