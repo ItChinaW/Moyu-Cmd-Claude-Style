@@ -2217,6 +2217,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "dirs",
+ "ego-tree",
  "futures",
  "ratatui",
  "reqwest",
