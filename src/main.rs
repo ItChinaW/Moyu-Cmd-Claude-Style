@@ -6,9 +6,8 @@ mod ui;
 
 use anyhow::Result;
 
-fn main() -> Result<()> {
-    let signer = platform::zhihu::sign::ZhihuSigner::new()?;
-    let demo = "101_3_3.0+/api/v3/feed/topstory/hot-lists/total?limit=50&desktop=true+DEMO_DC0";
-    println!("x-zse-96 = {}", signer.sign(demo)?);
-    Ok(())
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    let cfg = config::Config::load()?;
+    app::runner::run_app(cfg.zhihu.cookie).await
 }
