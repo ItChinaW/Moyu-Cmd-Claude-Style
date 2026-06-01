@@ -1,5 +1,6 @@
 mod platform;
 mod config;
+mod net;
 
 fn main() -> anyhow::Result<()> {
     let signer = platform::zhihu::sign::ZhihuSigner::new()?;
