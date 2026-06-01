@@ -4,6 +4,14 @@ use rquickjs::{context::EvalOptions, CatchResultExt, CaughtError, Context, Runti
 const CRYPTO_JS: &str = include_str!("../../../assets/crypto-js.min.js");
 const ZHIHU_RAW_JS: &str = include_str!("../../../assets/zhihu.raw.js");
 
+pub const X_ZSE_93: &str = "101_3_3.0";
+
+/// Construct the string fed to the JS `encrypt()` for `x-zse-96`.
+/// `path_with_query` is the request path including `?query` (no host).
+pub fn build_sign_input(path_with_query: &str, d_c0: &str) -> String {
+    format!("{X_ZSE_93}+{path_with_query}+{d_c0}")
+}
+
 pub struct ZhihuSigner {
     // `runtime` must be kept alive for the lifetime of `context`.
     _runtime: Runtime,
@@ -156,6 +164,18 @@ if (typeof __encrypt !== 'function') {{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builds_sign_input() {
+        let got = super::build_sign_input(
+            "/api/v3/feed/topstory/hot-lists/total?limit=50&desktop=true",
+            "AB12",
+        );
+        assert_eq!(
+            got,
+            "101_3_3.0+/api/v3/feed/topstory/hot-lists/total?limit=50&desktop=true+AB12"
+        );
+    }
 
     #[test]
     fn signer_produces_deterministic_zse96() {
