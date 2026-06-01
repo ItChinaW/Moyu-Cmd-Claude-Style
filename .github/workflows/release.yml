@@ -51,18 +51,20 @@ jobs:
     name: publish to npm
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - name: Sync version to tag
+      - name: Publish (skips if NPM_TOKEN not set)
         working-directory: npm
-        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
-      - name: Publish
-        working-directory: npm
-        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN 未设置,跳过 npm 发布(在仓库 Settings → Secrets 添加 NPM_TOKEN 即可自动发布)。"
+            exit 0
+          fi
+          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+          npm publish --access public
