@@ -211,7 +211,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("c", "开关 Claude 伪装(详情页)"),
         kv("r", "刷新(列表页)"),
         kv("q", "退出"),
-        kv("`", "老板键:一键隐藏 / 恢复"),
+        kv("` 或 ·", "老板键:一键隐藏 / 恢复(中英文输入法都可)"),
         Line::from(""),
         Line::from(Span::styled(" 按 ← 或 Esc 返回", dim)),
     ];

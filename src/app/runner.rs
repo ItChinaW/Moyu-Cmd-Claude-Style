@@ -172,9 +172,10 @@ fn apply_update(app: &mut App, upd: Update) {
 }
 
 fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Request>) {
-    // Boss key: ` toggles a fake innocuous screen. Works on every screen and even
-    // while typing; while hidden, all other keys are swallowed. Not advertised on-screen.
-    if code == KeyCode::Char('`') {
+    // Boss key: the backtick key toggles a fake innocuous screen. Works on every
+    // screen and even while typing; while hidden, all other keys are swallowed.
+    // Not advertised on-screen. Accepts the Chinese-IME variants too (see is_boss_key).
+    if is_boss_key(code) {
         app.boss_mode = !app.boss_mode;
         return;
     }
@@ -246,6 +247,13 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         }
         _ => {}
     }
+}
+
+/// The boss key is the physical backtick/tilde key (left of `1`). Input methods emit
+/// different characters for it: English `` ` ``, while Chinese IMEs produce a middle dot
+/// (`·` on macOS Pinyin, `・`/`•` on others). Accept all so it works in any input mode.
+fn is_boss_key(code: KeyCode) -> bool {
+    matches!(code, KeyCode::Char('`' | '·' | '・' | '•'))
 }
 
 fn open_url(url: &str) {
@@ -356,6 +364,11 @@ mod tests {
         assert!(app.boss_mode, "backtick should enable boss mode");
         handle_key(&mut app, KeyCode::Char('`'), &tx);
         assert!(!app.boss_mode, "backtick again should disable it");
+        // Chinese IME emits a middle dot for the same physical key — must also work.
+        handle_key(&mut app, KeyCode::Char('·'), &tx);
+        assert!(app.boss_mode, "Chinese-IME middle dot should enable boss mode");
+        handle_key(&mut app, KeyCode::Char('·'), &tx);
+        assert!(!app.boss_mode, "middle dot again should disable it");
     }
 
     #[test]
