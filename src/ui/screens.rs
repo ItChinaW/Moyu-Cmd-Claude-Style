@@ -64,45 +64,81 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(List::new(items), area);
 }
 
-/// Dim Claude-Code-style decoy lines interleaved between answer paragraphs.
-/// Uses the user's real project filenames so a passing glance reads as coding.
-const DECOYS: &[&str] = &[
-    "⏺ Read app/admin/personal/profile/page.tsx (142 lines)",
-    "    export default function ProfilePage() {",
-    "⏺ Update components/ModelPriceFormBlocks.tsx",
-    "    +   const [loading, setLoading] = useState(false)",
-    "● Bash(pnpm typecheck)  ⎿  0 errors, 0 warnings",
-    "⏺ Edit components/ModelIconPickerModal.tsx",
-    "    -   onClose={() => setOpen(false)}",
-    "    return <ProfileForm onSubmit={handleSubmit} />",
-    "⏺ Wrote app/admin/users/route.ts (28 lines)",
-    "    await db.user.update({ where: { id }, data })",
-    "● Search(useEffect dependency array)  ⎿  3 matches",
-    "    const handleSubmit = useCallback(async () => {",
-];
+/// One authentic-looking Claude Code transcript block (rotated by index), styled to
+/// match a real session: colored ● bullets, bold tool names, ⎿ result lines,
+/// Error/Exit codes, git diff stats, "+N lines (ctrl+o to expand)". Uses the user's
+/// real internal git remote and project paths so a passing glance reads as coding.
+fn decoy_block(i: usize) -> Vec<Line<'static>> {
+    let red = Style::default().fg(Color::Red);
+    let green = Style::default().fg(Color::Green);
+    let dim = Style::default().fg(Color::DarkGray);
+    let pink = Style::default().fg(Color::LightRed);
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let bullet = |c: Color| Span::styled("● ", Style::default().fg(c));
+    let repo = "http://192.168.5.11:3100/kw_product/tiansuan_platform.git";
+    match i % 6 {
+        0 => vec![Line::from(vec![
+            bullet(Color::Gray),
+            Span::styled("Changes look consistent. Committing:", Style::default().fg(Color::Gray)),
+        ])],
+        1 => vec![
+            Line::from(vec![bullet(Color::Red), Span::styled("Bash", bold),
+                Span::raw("(git add -u && git commit -m \"preserve dark CTA button backgrounds…\")")]),
+            Line::from(vec![Span::styled("  ⎿  ", dim), Span::styled("Error: Exit code 1", red)]),
+            Line::from(Span::styled("     [dev 2b88b813] preserve dark CTA button backgrounds on hover across admin", pink)),
+            Line::from(Span::styled("      18 files changed, 34 insertions(+), 34 deletions(-)", dim)),
+            Line::from(Span::styled("  … +16 lines (ctrl+o to expand)", dim)),
+        ],
+        2 => vec![
+            Line::from(vec![bullet(Color::Green), Span::styled("Bash", bold),
+                Span::raw("(git diff app/admin/personal/profile/page.tsx | head -60)")]),
+            Line::from(Span::styled("  ⎿  diff --git a/fronted/app/admin/personal/profile/page.tsx", dim)),
+            Line::from(Span::styled("     index 10c01820..7c3faab1 100644", dim)),
+            Line::from(Span::styled("  … +57 lines (ctrl+o to expand)", dim)),
+        ],
+        3 => vec![
+            Line::from(vec![bullet(Color::Red), Span::styled("Bash", bold),
+                Span::raw("(git pull --rebase && git push)")]),
+            Line::from(vec![Span::styled("  ⎿  ", dim), Span::styled("Error: Exit code 1", red)]),
+            Line::from(Span::styled(format!("     fatal: unable to access '{repo}/': Empty reply from server"), pink)),
+        ],
+        4 => vec![
+            Line::from(vec![bullet(Color::Green), Span::styled("Update", bold),
+                Span::raw(" components/admin/ModelPriceFormBlocks.tsx")]),
+            Line::from(Span::styled("  ⎿  Updated with 2 additions and 1 removal", dim)),
+            Line::from(Span::styled("       +   const [loading, setLoading] = useState(false)", green)),
+            Line::from(Span::styled("       -   onClose={() => setOpen(false)}", red)),
+        ],
+        _ => vec![
+            Line::from(vec![bullet(Color::Red), Span::styled("Bash", bold),
+                Span::raw("(sleep 5 && git push 2>&1; git status)")]),
+            Line::from(vec![Span::styled("  ⎿  ", dim), Span::styled("Error: Exit code 128", red)]),
+            Line::from(Span::styled(format!("     fatal: unable to access '{repo}/': Empty reply from server"), pink)),
+        ],
+    }
+}
 
 fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
-    let body = match app.current_detail() {
-        Some(d) => format!("{} · 赞{}\n\n{}", d.author, d.voteup, d.body),
-        None => "(无内容)".to_string(),
+    let (header, body) = match app.current_detail() {
+        Some(d) => (format!("● {} · 赞{}", d.author, d.voteup), d.body.clone()),
+        None => ("●".to_string(), "(无内容)".to_string()),
     };
-    let dim = Style::default().fg(Color::DarkGray);
-    let mut lines: Vec<Line> = Vec::new();
+    let mut lines: Vec<Line<'static>> = Vec::new();
     if app.camouflage {
-        // Real text in default color (readable); at each paragraph break drop in a
-        // dim decoy code line. Deterministic rotation keeps decoys stable on redraw.
-        let mut decoy_i = 0usize;
-        let mut prev_blank = true; // suppress a leading decoy
+        // Real answer text stays bright (reads like Claude's narration); between
+        // paragraphs we drop in a colored Claude-Code tool-call block.
+        lines.push(Line::from(Span::styled(header, Style::default().fg(Color::Gray))));
+        lines.push(Line::from(""));
+        let mut block_i = 0usize;
+        let mut prev_blank = true;
         for src in body.split('\n') {
             if src.is_empty() {
                 if !prev_blank {
-                    lines.push(Line::from(Span::styled(
-                        DECOYS[decoy_i % DECOYS.len()].to_string(),
-                        dim,
-                    )));
-                    decoy_i += 1;
+                    lines.push(Line::from(""));
+                    lines.extend(decoy_block(block_i));
+                    lines.push(Line::from(""));
+                    block_i += 1;
                 }
-                lines.push(Line::from(""));
                 prev_blank = true;
             } else {
                 lines.push(Line::from(src.to_string()));
@@ -110,6 +146,8 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
             }
         }
     } else {
+        lines.push(Line::from(header));
+        lines.push(Line::from(""));
         for src in body.split('\n') {
             lines.push(Line::from(src.to_string()));
         }
