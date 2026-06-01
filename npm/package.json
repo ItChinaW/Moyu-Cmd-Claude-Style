@@ -1,0 +1,40 @@
+{
+  "name": "moyu-cli",
+  "version": "0.1.0",
+  "description": "在终端里摸鱼的知乎客户端,带 Claude Code 风格伪装与老板键",
+  "bin": {
+    "moyu": "bin/moyu.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/moyu.js",
+    "install.js"
+  ],
+  "keywords": [
+    "moyu",
+    "zhihu",
+    "tui",
+    "terminal",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItChinaW/Moyu-Cmd-Claude-Style.git"
+  },
+  "homepage": "https://github.com/ItChinaW/Moyu-Cmd-Claude-Style",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  },
+  "os": [
+    "darwin",
+    "win32",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

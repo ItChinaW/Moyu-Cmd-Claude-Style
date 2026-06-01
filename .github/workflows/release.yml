@@ -1,0 +1,68 @@
+name: release
+
+# 打一个 v 开头的 tag 就会触发:各平台原生编译 → 上传到 GitHub Release →(可选)发布到 npm。
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: moyu-darwin-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: moyu-darwin-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: moyu-linux-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: moyu-win32-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage binary (unix)
+        if: runner.os != 'Windows'
+        run: cp "target/${{ matrix.target }}/release/moyu" "${{ matrix.asset }}"
+      - name: Stage binary (windows)
+        if: runner.os == 'Windows'
+        run: copy "target\${{ matrix.target }}\release\moyu.exe" "${{ matrix.asset }}"
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+
+  publish-npm:
+    name: publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Sync version to tag
+        working-directory: npm
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+      - name: Publish
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

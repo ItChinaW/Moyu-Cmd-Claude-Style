@@ -1,1 +1,7 @@
 /target
+
+# build/dist artifacts
+/dist
+npm/bin/moyu
+npm/bin/moyu.exe
+*.download
