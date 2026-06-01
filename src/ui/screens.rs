@@ -75,7 +75,7 @@ fn decoy_block(i: usize) -> Vec<Line<'static>> {
     let pink = Style::default().fg(Color::LightRed);
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let bullet = |c: Color| Span::styled("● ", Style::default().fg(c));
-    let repo = "http://192.168.5.11:3100/kw_product/tiansuan_platform.git";
+    let repo = "http://gitlab.internal:3000/web/admin-portal.git";
     match i % 6 {
         0 => vec![Line::from(vec![
             bullet(Color::Gray),
@@ -91,8 +91,8 @@ fn decoy_block(i: usize) -> Vec<Line<'static>> {
         ],
         2 => vec![
             Line::from(vec![bullet(Color::Green), Span::styled("Bash", bold),
-                Span::raw("(git diff app/admin/personal/profile/page.tsx | head -60)")]),
-            Line::from(Span::styled("  ⎿  diff --git a/fronted/app/admin/personal/profile/page.tsx", dim)),
+                Span::raw("(git diff app/dashboard/profile/page.tsx | head -60)")]),
+            Line::from(Span::styled("  ⎿  diff --git a/app/dashboard/profile/page.tsx", dim)),
             Line::from(Span::styled("     index 10c01820..7c3faab1 100644", dim)),
             Line::from(Span::styled("  … +57 lines (ctrl+o to expand)", dim)),
         ],
@@ -104,7 +104,7 @@ fn decoy_block(i: usize) -> Vec<Line<'static>> {
         ],
         4 => vec![
             Line::from(vec![bullet(Color::Green), Span::styled("Update", bold),
-                Span::raw(" components/admin/ModelPriceFormBlocks.tsx")]),
+                Span::raw(" components/PriceForm.tsx")]),
             Line::from(Span::styled("  ⎿  Updated with 2 additions and 1 removal", dim)),
             Line::from(Span::styled("       +   const [loading, setLoading] = useState(false)", green)),
             Line::from(Span::styled("       -   onClose={() => setOpen(false)}", red)),
@@ -196,11 +196,11 @@ fn draw_boss(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from("Route (app)                                Size     First Load JS"),
         Line::from("┌ ○ /                                      1.21 kB         96.3 kB"),
-        Line::from("├ ○ /admin/personal/profile                3.44 kB          112 kB"),
-        Line::from("├ ○ /admin/users                           2.18 kB          104 kB"),
+        Line::from("├ ○ /dashboard/profile                3.44 kB          112 kB"),
+        Line::from("├ ○ /dashboard/users                           2.18 kB          104 kB"),
         Line::from("└ ○ /dashboard                             5.07 kB          128 kB"),
         Line::from(""),
-        Line::from(Span::styled("   Compiling /admin/personal/profile ...", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled("   Compiling /dashboard/profile ...", Style::default().fg(Color::DarkGray))),
     ];
     f.render_widget(Paragraph::new(lines), area);
 }
