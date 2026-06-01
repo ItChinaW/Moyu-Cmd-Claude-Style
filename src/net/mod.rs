@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use reqwest::header::{HeaderMap, HeaderValue};
+use std::time::Duration;
 
 pub const HOST: &str = "https://www.zhihu.com";
 pub const USER_AGENT: &str =
@@ -25,6 +26,8 @@ impl HttpClient {
     pub fn new() -> Result<Self> {
         let inner = reqwest::Client::builder()
             .gzip(true)
+            .connect_timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(20))
             .build()
             .context("build reqwest client")?;
         Ok(Self { inner })

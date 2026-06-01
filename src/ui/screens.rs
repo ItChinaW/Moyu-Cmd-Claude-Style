@@ -35,9 +35,10 @@ fn draw_login(f: &mut Frame, area: Rect, app: &App) {
     } else {
         "未检测到登录态。\n从浏览器 F12 → Network → 任意知乎请求复制 Cookie，\n粘贴到下方命令行后回车。".to_string()
     };
+    let title = if app.loading { "验证中…" } else { "知乎登录" };
     let p = Paragraph::new(msg)
         .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL).title("知乎登录"));
+        .block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(p, area);
 }
 
@@ -47,10 +48,17 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
         let style = if i == app.list_cursor() {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         } else { Style::default() };
-        ListItem::new(Line::from(vec![
+        let mut lines = vec![Line::from(vec![
             Span::raw(marker),
             Span::styled(format!("{}. {}", i + 1, e.title), style),
-        ]))
+        ])];
+        if !e.subtitle.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!("     {}", e.subtitle),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        ListItem::new(lines)
     }).collect();
     let title = if app.loading { "加载中…" } else { "知乎" };
     f.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title(title)), area);
@@ -70,10 +78,13 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_comments(f: &mut Frame, area: Rect, app: &App) {
     let text: Vec<Line> = app.comments.iter().flat_map(|c| {
+        let header = if c.child_count > 0 {
+            format!("{} (赞{} · {}条回复)", c.author, c.like_count, c.child_count)
+        } else {
+            format!("{} (赞{})", c.author, c.like_count)
+        };
         vec![
-            Line::from(Span::styled(
-                format!("{} (赞{})", c.author, c.like_count),
-                Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled(header, Style::default().fg(Color::Yellow))),
             Line::from(c.body.clone()),
             Line::from(""),
         ]
@@ -91,7 +102,13 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
     } else {
         Line::from(format!("> {}", app.command))
     };
-    let hint = "↑↓选择 Enter进入 ←返回 /命令 q退出";
+    let hint = match app.screen() {
+        Screen::Root => "输入 /zhihu 进入知乎   /quit 退出",
+        Screen::Login => "粘贴 Cookie 后回车   Esc 返回",
+        Screen::List => "↑↓选择 Enter进入 /search搜索 ←返回 q退出",
+        Screen::Detail => "↑↓滚动 n/p切换回答 →/Tab看评论 ←返回",
+        Screen::Comments => "↑↓滚动 ←返回",
+    };
     f.render_widget(
         Paragraph::new(line).block(Block::default().borders(Borders::ALL).title(hint)),
         area,

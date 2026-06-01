@@ -76,6 +76,12 @@ async fn handle(client: &mut Option<ZhihuClient>, req: Request) -> Update {
 }
 
 pub async fn run_app(cookie: String) -> Result<()> {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen);
+        original_hook(info);
+    }));
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
@@ -162,11 +168,20 @@ fn apply_update(app: &mut App, upd: Update) {
 fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Request>) {
     match code {
         KeyCode::Char(c) => {
-            // On Login everything typed is the cookie; elsewhere typing begins with '/'.
-            if *app.screen() == Screen::Login || c == '/' || !app.command.is_empty() {
+            app.error = None;
+            let on_login = *app.screen() == Screen::Login;
+            if on_login || c == '/' || !app.command.is_empty() {
                 app.command.push(c);
             } else if c == 'q' {
                 app.should_quit = true;
+            } else if *app.screen() == Screen::Detail {
+                if c == 'n' && app.detail_idx + 1 < app.details.len() {
+                    app.detail_idx += 1;
+                    app.detail_scroll = 0;
+                } else if c == 'p' {
+                    app.detail_idx = app.detail_idx.saturating_sub(1);
+                    app.detail_scroll = 0;
+                }
             }
         }
         KeyCode::Backspace => { app.command.pop(); }
@@ -199,14 +214,11 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
             _ => {}
         },
         KeyCode::Left => app.back(),
-        KeyCode::Right | KeyCode::Tab => {
-            if *app.screen() == Screen::Detail {
-                // clone the id first so the immutable borrow ends before we mutate `app`
-                let aid = app.current_detail().map(|d| d.answer_id.clone());
-                if let Some(aid) = aid {
-                    app.loading = true;
-                    let _ = req_tx.send(Request::Comments(aid));
-                }
+        KeyCode::Right | KeyCode::Tab if *app.screen() == Screen::Detail => {
+            // clone the id first so the immutable borrow ends before we mutate `app`
+            if let Some(aid) = app.current_detail().map(|d| d.answer_id.clone()) {
+                app.loading = true;
+                let _ = req_tx.send(Request::Comments(aid));
             }
         }
         _ => {}

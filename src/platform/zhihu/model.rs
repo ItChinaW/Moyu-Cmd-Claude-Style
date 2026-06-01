@@ -61,8 +61,6 @@ pub struct Highlight {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct SearchObject {
-    #[serde(rename = "type", default)]
-    pub kind: String,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -118,7 +116,6 @@ pub struct CommentResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct Comment {
-    pub id: String,
     #[serde(default)]
     pub content: String,
     #[serde(default)]
