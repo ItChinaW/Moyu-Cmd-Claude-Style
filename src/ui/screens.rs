@@ -1,0 +1,99 @@
+use crate::app::App;
+use crate::app::state::Screen;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+};
+
+pub fn draw(f: &mut Frame, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .split(f.area());
+    match app.screen() {
+        Screen::Root => draw_root(f, chunks[0]),
+        Screen::Login => draw_login(f, chunks[0], app),
+        Screen::List => draw_list(f, chunks[0], app),
+        Screen::Detail => draw_detail(f, chunks[0], app),
+        Screen::Comments => draw_comments(f, chunks[0], app),
+    }
+    draw_command_bar(f, chunks[1], app);
+}
+
+fn draw_root(f: &mut Frame, area: Rect) {
+    let p = Paragraph::new("输入 /zhihu 进入知乎\n(以后: /tieba 进入贴吧)")
+        .block(Block::default().borders(Borders::ALL).title("touch-fish"));
+    f.render_widget(p, area);
+}
+
+fn draw_login(f: &mut Frame, area: Rect, app: &App) {
+    let msg = if let Some(e) = &app.error {
+        format!("登录失败: {e}\n\n请重新粘贴知乎 Cookie 后回车")
+    } else {
+        "未检测到登录态。\n从浏览器 F12 → Network → 任意知乎请求复制 Cookie，\n粘贴到下方命令行后回车。".to_string()
+    };
+    let p = Paragraph::new(msg)
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title("知乎登录"));
+    f.render_widget(p, area);
+}
+
+fn draw_list(f: &mut Frame, area: Rect, app: &App) {
+    let items: Vec<ListItem> = app.list.iter().enumerate().map(|(i, e)| {
+        let marker = if i == app.list_cursor() { "> " } else { "  " };
+        let style = if i == app.list_cursor() {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else { Style::default() };
+        ListItem::new(Line::from(vec![
+            Span::raw(marker),
+            Span::styled(format!("{}. {}", i + 1, e.title), style),
+        ]))
+    }).collect();
+    let title = if app.loading { "加载中…" } else { "知乎" };
+    f.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title(title)), area);
+}
+
+fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
+    let (title, body) = match app.current_detail() {
+        Some(d) => (format!("{} · 赞{}", d.author, d.voteup), d.body.clone()),
+        None => ("详情".to_string(), "(无内容)".to_string()),
+    };
+    let p = Paragraph::new(body)
+        .wrap(Wrap { trim: false })
+        .scroll((app.detail_scroll, 0))
+        .block(Block::default().borders(Borders::ALL).title(title));
+    f.render_widget(p, area);
+}
+
+fn draw_comments(f: &mut Frame, area: Rect, app: &App) {
+    let text: Vec<Line> = app.comments.iter().flat_map(|c| {
+        vec![
+            Line::from(Span::styled(
+                format!("{} (赞{})", c.author, c.like_count),
+                Style::default().fg(Color::Yellow))),
+            Line::from(c.body.clone()),
+            Line::from(""),
+        ]
+    }).collect();
+    let p = Paragraph::new(text)
+        .wrap(Wrap { trim: true })
+        .scroll((app.comment_scroll, 0))
+        .block(Block::default().borders(Borders::ALL).title("评论"));
+    f.render_widget(p, area);
+}
+
+fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
+    let line = if let Some(e) = &app.error {
+        Line::from(Span::styled(format!(" {e} "), Style::default().fg(Color::Red)))
+    } else {
+        Line::from(format!("> {}", app.command))
+    };
+    let hint = "↑↓选择 Enter进入 ←返回 /命令 q退出";
+    f.render_widget(
+        Paragraph::new(line).block(Block::default().borders(Borders::ALL).title(hint)),
+        area,
+    );
+}

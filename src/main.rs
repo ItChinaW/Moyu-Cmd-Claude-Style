@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod net;
 mod platform;
+mod ui;
 
 use anyhow::Result;
 
