@@ -10,6 +10,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[derive(Debug)]
 pub enum Request {
     Connect(String),     // cookie
     HotList,
@@ -237,5 +238,166 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Back => app.back(),
         Command::Quit => app.should_quit = true,
         Command::Unknown(s) => app.error = Some(format!("未知命令: {s}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::state::Screen;
+    use crate::app::command::Command;
+    use crate::platform::{ListEntry, DetailView};
+    use crossterm::event::KeyCode;
+    use tokio::sync::mpsc;
+
+    fn entry(title: &str, qid: Option<&str>) -> ListEntry {
+        ListEntry {
+            title: title.into(),
+            subtitle: String::new(),
+            question_id: qid.map(|s| s.to_string()),
+        }
+    }
+
+    fn make_channel() -> (mpsc::UnboundedSender<Request>, mpsc::UnboundedReceiver<Request>) {
+        mpsc::unbounded_channel::<Request>()
+    }
+
+    // 1. dispatch_zhihu_with_cookie_requests_hotlist
+    #[test]
+    fn dispatch_zhihu_with_cookie_requests_hotlist() {
+        let mut app = App::new();
+        app.cookie = "x".into();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Zhihu, &tx);
+        match rx.try_recv() {
+            Ok(Request::HotList) => {}
+            other => panic!("expected HotList, got {:?}", other),
+        }
+    }
+
+    // 2. dispatch_zhihu_without_cookie_goes_to_login
+    #[test]
+    fn dispatch_zhihu_without_cookie_goes_to_login() {
+        let mut app = App::new();
+        // cookie is empty by default
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Zhihu, &tx);
+        assert_eq!(app.screen(), &Screen::Login);
+        assert!(rx.try_recv().is_err(), "nothing should have been sent");
+    }
+
+    // 3. dispatch_search_sends_search_request
+    #[test]
+    fn dispatch_search_sends_search_request() {
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Search("rust".into()), &tx);
+        match rx.try_recv() {
+            Ok(Request::Search(q)) => assert_eq!(q, "rust"),
+            other => panic!("expected Search(rust), got {:?}", other),
+        }
+    }
+
+    // 4. dispatch_quit_sets_should_quit
+    #[test]
+    fn dispatch_quit_sets_should_quit() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        dispatch_command(&mut app, Command::Quit, &tx);
+        assert!(app.should_quit);
+    }
+
+    // 5. dispatch_unknown_sets_error
+    #[test]
+    fn dispatch_unknown_sets_error() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        dispatch_command(&mut app, Command::Unknown("/foo".into()), &tx);
+        assert!(app.error.is_some(), "expected an error message to be set");
+    }
+
+    // 6. typing_a_command_then_enter_dispatches
+    #[test]
+    fn typing_a_command_then_enter_dispatches() {
+        let mut app = App::new();
+        app.cookie = "x".into();
+        let (tx, mut rx) = make_channel();
+        for c in "/zhihu".chars() {
+            handle_key(&mut app, KeyCode::Char(c), &tx);
+        }
+        handle_key(&mut app, KeyCode::Enter, &tx);
+        match rx.try_recv() {
+            Ok(Request::HotList) => {}
+            other => panic!("expected HotList, got {:?}", other),
+        }
+        assert!(app.command.is_empty(), "command buffer should be cleared after dispatch");
+    }
+
+    // 7. q_on_root_quits_when_not_composing
+    #[test]
+    fn q_on_root_quits_when_not_composing() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        handle_key(&mut app, KeyCode::Char('q'), &tx);
+        assert!(app.should_quit);
+    }
+
+    // 8. slash_starts_command_buffer
+    #[test]
+    fn slash_starts_command_buffer() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        handle_key(&mut app, KeyCode::Char('/'), &tx);
+        assert_eq!(app.command, "/");
+        assert!(!app.should_quit);
+    }
+
+    // 9. open_selection_on_list_sends_answers
+    #[test]
+    fn open_selection_on_list_sends_answers() {
+        let mut app = App::new();
+        app.set_list(vec![entry("t", Some("123"))]);
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        open_selection(&mut app, &tx);
+        match rx.try_recv() {
+            Ok(Request::Answers(id)) => assert_eq!(id, "123"),
+            other => panic!("expected Answers(123), got {:?}", other),
+        }
+        assert!(app.loading);
+    }
+
+    // 10. apply_list_update_from_login_replaces_to_list
+    #[test]
+    fn apply_list_update_from_login_replaces_to_list() {
+        let mut app = App::new();
+        app.replace(Screen::Login);
+        apply_update(&mut app, Update::List(vec![entry("t", None)]));
+        assert_eq!(app.screen(), &Screen::List);
+        assert_eq!(app.list.len(), 1);
+    }
+
+    // 11. apply_details_update_pushes_detail
+    #[test]
+    fn apply_details_update_pushes_detail() {
+        let mut app = App::new();
+        apply_update(&mut app, Update::Details(vec![DetailView {
+            author: "a".into(),
+            voteup: 1,
+            body: "b".into(),
+            answer_id: "9".into(),
+        }]));
+        assert_eq!(app.screen(), &Screen::Detail);
+        assert!(app.current_detail().is_some());
+    }
+
+    // 12. apply_error_update_sets_error_without_navigating
+    #[test]
+    fn apply_error_update_sets_error_without_navigating() {
+        let mut app = App::new();
+        // app starts at Root
+        apply_update(&mut app, Update::Error("boom".into()));
+        assert_eq!(app.error.as_deref(), Some("boom"));
+        assert_eq!(app.screen(), &Screen::Root);
     }
 }
