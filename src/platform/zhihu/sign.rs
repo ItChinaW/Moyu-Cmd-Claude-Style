@@ -10,11 +10,6 @@ pub struct ZhihuSigner {
     context: Context,
 }
 
-// SAFETY: rquickjs Runtime/Context are not Send by default, but we only use
-// them from one thread at a time and wrap all access in `context.with`.
-// QuickJS itself is not thread-safe, so callers must ensure no concurrent use.
-unsafe impl Send for ZhihuSigner {}
-
 /// Format a JS exception/error into a human-readable string.
 fn format_caught(err: CaughtError<'_>) -> String {
     match err {
