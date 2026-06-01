@@ -26,6 +26,8 @@ pub struct App {
     pub should_quit: bool,
     pub cookie: String,
     pub list_source: ListSource,
+    /// Boss key: when true the UI shows an innocuous fake screen and swallows input.
+    pub boss_mode: bool,
 }
 
 impl App {
@@ -38,6 +40,7 @@ impl App {
             command: String::new(), loading: false, error: None,
             should_quit: false, cookie: String::new(),
             list_source: ListSource::Recommend,
+            boss_mode: false,
         }
     }
 

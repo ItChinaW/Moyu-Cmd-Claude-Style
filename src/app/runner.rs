@@ -172,6 +172,15 @@ fn apply_update(app: &mut App, upd: Update) {
 }
 
 fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Request>) {
+    // Boss key: ` toggles a fake innocuous screen. Works on every screen and even
+    // while typing; while hidden, all other keys are swallowed. Not advertised on-screen.
+    if code == KeyCode::Char('`') {
+        app.boss_mode = !app.boss_mode;
+        return;
+    }
+    if app.boss_mode {
+        return;
+    }
     match code {
         KeyCode::Char(c) => {
             app.error = None;
@@ -333,6 +342,28 @@ mod tests {
 
     fn make_channel() -> (mpsc::UnboundedSender<Request>, mpsc::UnboundedReceiver<Request>) {
         mpsc::unbounded_channel::<Request>()
+    }
+
+    #[test]
+    fn boss_key_toggles_boss_mode() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        assert!(!app.boss_mode);
+        handle_key(&mut app, KeyCode::Char('`'), &tx);
+        assert!(app.boss_mode, "backtick should enable boss mode");
+        handle_key(&mut app, KeyCode::Char('`'), &tx);
+        assert!(!app.boss_mode, "backtick again should disable it");
+    }
+
+    #[test]
+    fn boss_mode_swallows_other_keys() {
+        let mut app = App::new();
+        app.boss_mode = true;
+        let (tx, _rx) = make_channel();
+        // 'q' would normally quit; in boss mode it must be ignored.
+        handle_key(&mut app, KeyCode::Char('q'), &tx);
+        assert!(!app.should_quit, "q must be swallowed while hidden");
+        assert!(app.command.is_empty(), "typing must be swallowed while hidden");
     }
 
     // 1. dispatch_zhihu_with_cookie_requests_recommend

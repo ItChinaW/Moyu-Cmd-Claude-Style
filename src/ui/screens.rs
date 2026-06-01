@@ -9,6 +9,10 @@ use ratatui::{
 };
 
 pub fn draw(f: &mut Frame, app: &App) {
+    if app.boss_mode {
+        draw_boss(f, f.area());
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(2)])
@@ -87,6 +91,34 @@ fn draw_comments(f: &mut Frame, area: Rect, app: &App) {
         .wrap(Wrap { trim: true })
         .scroll((app.comment_scroll, 0));
     f.render_widget(p, area);
+}
+
+/// Innocuous "I'm definitely working" screen shown when the boss key is pressed.
+/// Looks like a Next.js production build sitting idle in a terminal.
+fn draw_boss(f: &mut Frame, area: Rect) {
+    let lines = vec![
+        Line::from("$ pnpm build"),
+        Line::from(""),
+        Line::from("> frontend@0.1.0 build"),
+        Line::from("> next build"),
+        Line::from(""),
+        Line::from("   ▲ Next.js 14.2.3"),
+        Line::from(""),
+        Line::from("   Creating an optimized production build ..."),
+        Line::from(Span::styled(" ✓ Compiled successfully", Style::default().fg(Color::Green))),
+        Line::from("   Linting and checking validity of types ..."),
+        Line::from("   Collecting page data ..."),
+        Line::from("   Generating static pages (38/48) ..."),
+        Line::from(""),
+        Line::from("Route (app)                                Size     First Load JS"),
+        Line::from("┌ ○ /                                      1.21 kB         96.3 kB"),
+        Line::from("├ ○ /admin/personal/profile                3.44 kB          112 kB"),
+        Line::from("├ ○ /admin/users                           2.18 kB          104 kB"),
+        Line::from("└ ○ /dashboard                             5.07 kB          128 kB"),
+        Line::from(""),
+        Line::from(Span::styled("   Compiling /admin/personal/profile ...", Style::default().fg(Color::DarkGray))),
+    ];
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
