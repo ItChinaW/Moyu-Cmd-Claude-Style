@@ -1,6 +1,21 @@
 # touch-fish 🐟
 
+[![npm](https://img.shields.io/npm/v/moyu-fish.svg)](https://www.npmjs.com/package/moyu-fish)
+
 在终端(cmd / PowerShell / macOS / Linux)里摸鱼。v1 支持知乎:热榜、搜索、回答详情、评论,全程方向键浏览,界面就画在当前终端窗口里。
+
+## 安装
+
+npm 包地址:https://www.npmjs.com/package/moyu-fish
+
+```bash
+# 直接运行(无需安装)
+npx moyu-fish
+
+# 或全局安装(安装后命令为 moyu)
+npm install -g moyu-fish
+moyu
+```
 
 ## 使用
 
