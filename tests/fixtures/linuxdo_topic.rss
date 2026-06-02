@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>某话题</title>
+  <item><title>re2</title><link>https://linux.do/t/topic/1/3</link><description><![CDATA[<p>第二条回复</p><p><a href="">阅读完整话题</a></p>]]></description></item>
+  <item><title>re1</title><link>https://linux.do/t/topic/1/2</link><description><![CDATA[<p>第一条回复</p>]]></description></item>
+  <item><title>op</title><link>https://linux.do/t/topic/1/1</link><description><![CDATA[<p>主楼正文</p>]]></description></item>
+</channel></rss>

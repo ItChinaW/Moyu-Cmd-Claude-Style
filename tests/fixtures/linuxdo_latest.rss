@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Linux.do</title>
+  <item><title>话题一</title><link>https://linux.do/t/topic/1001</link><description><![CDATA[<p>摘要一</p>]]></description></item>
+  <item><title>话题二</title><link>https://linux.do/t/topic/1002</link><description><![CDATA[<p>摘要二</p>]]></description></item>
+</channel></rss>
