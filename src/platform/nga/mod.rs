@@ -8,7 +8,9 @@ const BASE: &str = "https://bbs.nga.cn";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 pub const DEFAULT_FID: &str = "-7";
 
-fn gbk_to_string(bytes: &[u8]) -> String { let (c, _, _) = encoding_rs::GBK.decode(bytes); c.into_owned() }
+// NGA's lite=xml declares encoding="GB18030" (a superset of GBK); decode with
+// GB18030 so rare chars outside GBK don't mojibake. The decoder also accepts GBK.
+fn gbk_to_string(bytes: &[u8]) -> String { let (c, _, _) = encoding_rs::GB18030.decode(bytes); c.into_owned() }
 
 /// Drop every BBCode token: [tag], [/tag], smileys [s:..:..]. Keeps inner text.
 fn clean_bbcode(s: &str) -> String {
