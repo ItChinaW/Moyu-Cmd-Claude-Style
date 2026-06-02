@@ -6,6 +6,10 @@ pub struct ListEntry {
     pub title: String,
     pub subtitle: String,
     pub question_id: Option<String>,
+    /// The exact answer this row previewed, when the feed already carried it
+    /// (recommend cards do). Opening shows this directly so the body matches the
+    /// subtitle; `None` falls back to fetching the question's answer feed.
+    pub detail: Option<DetailView>,
 }
 
 /// A single answer rendered for the detail screen.

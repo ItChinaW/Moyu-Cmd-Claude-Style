@@ -391,12 +391,29 @@ fn image_path_for_digit(app: &App, c: char) -> Option<String> {
 }
 
 fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
-    if *app.screen() == Screen::List {
-        let qid = app.selected_entry().and_then(|e| e.question_id.clone());
-        if let Some(qid) = qid {
+    if *app.screen() != Screen::List {
+        return;
+    }
+    let entry = match app.selected_entry() {
+        Some(e) => (e.detail.clone(), e.question_id.clone()),
+        None => return,
+    };
+    match entry {
+        // Recommend cards carry the exact answer they previewed — show it directly
+        // so the body matches the subtitle (no extra request).
+        (Some(detail), _) => {
+            app.error = None;
+            app.details = vec![detail];
+            app.detail_idx = 0;
+            app.detail_scroll = 0;
+            app.push(Screen::Detail);
+            request_images(app, req_tx);
+        }
+        (None, Some(qid)) => {
             app.loading = true;
             let _ = req_tx.send(Request::Answers(qid));
         }
+        (None, None) => {}
     }
 }
 
@@ -462,6 +479,7 @@ mod tests {
             title: title.into(),
             subtitle: String::new(),
             question_id: qid.map(|s| s.to_string()),
+            detail: None,
         }
     }
 
@@ -729,6 +747,31 @@ mod tests {
             }
             other => panic!("expected FetchImages, got {:?}", other),
         }
+    }
+
+    // 15. recommend card with an inline answer opens it directly (body matches preview)
+    #[test]
+    fn open_selection_uses_prefetched_detail() {
+        let mut app = App::new();
+        app.set_list(vec![ListEntry {
+            title: "问题标题".into(),
+            subtitle: "预览摘要".into(),
+            question_id: Some("100".into()),
+            detail: Some(DetailView {
+                author: "作者".into(),
+                voteup: 5,
+                body: "预览的正文".into(),
+                images: vec![],
+                answer_id: "777".into(),
+            }),
+        }]);
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        open_selection(&mut app, &tx);
+        assert_eq!(app.screen(), &Screen::Detail);
+        assert_eq!(app.current_detail().map(|d| d.body.as_str()), Some("预览的正文"));
+        assert_eq!(app.current_detail().map(|d| d.answer_id.as_str()), Some("777"));
+        assert!(rx.try_recv().is_err(), "prefetched answer must not fetch the question feed");
     }
 
     // 12. apply_error_update_sets_error_without_navigating

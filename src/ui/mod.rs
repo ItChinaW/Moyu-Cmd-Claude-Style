@@ -45,8 +45,8 @@ mod tests {
     fn list_screen_shows_titles_and_cursor() {
         let mut app = App::new();
         app.set_list(vec![
-            ListEntry { title: "标题甲".into(), subtitle: String::new(), question_id: Some("1".into()) },
-            ListEntry { title: "标题乙".into(), subtitle: String::new(), question_id: Some("2".into()) },
+            ListEntry { title: "标题甲".into(), subtitle: String::new(), question_id: Some("1".into()), detail: None },
+            ListEntry { title: "标题乙".into(), subtitle: String::new(), question_id: Some("2".into()), detail: None },
         ]);
         app.push(Screen::List);
         let screen = render(&app);

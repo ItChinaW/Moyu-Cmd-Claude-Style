@@ -62,6 +62,16 @@ pub struct RecommendTarget {
     /// Populated for answers; contains the question title and id.
     #[serde(default)]
     pub question: Option<RecommendQuestion>,
+    /// Answer id — lets us open exactly the answer this card previewed.
+    #[serde(default)]
+    pub id: String,
+    /// Full answer HTML (answers carry it inline in the recommend feed).
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub voteup_count: i64,
+    #[serde(default)]
+    pub author: Author,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +195,19 @@ mod tests {
         let q = first_answer.target.question.as_ref().expect("answer must have a question");
         assert!(!q.title.is_empty(), "question must have a title");
         assert!(!q.id.is_empty(), "question must have an id");
+    }
+
+    #[test]
+    fn parses_recommend_answer_inline_content() {
+        // The recommend feed carries the answer's own id/content/author/votes inline,
+        // which we use to open exactly the previewed answer.
+        let raw = r#"{"data":[{"target":{"type":"answer","id":"555","content":"<p>正文</p>","voteup_count":12,"excerpt":"摘要","author":{"name":"老王"},"question":{"id":"100","title":"标题"}}}]}"#;
+        let r: RecommendResponse = serde_json::from_str(raw).expect("parse");
+        let t = &r.data[0].target;
+        assert_eq!(t.id, "555");
+        assert_eq!(t.content, "<p>正文</p>");
+        assert_eq!(t.voteup_count, 12);
+        assert_eq!(t.author.name, "老王");
     }
 
     #[test]

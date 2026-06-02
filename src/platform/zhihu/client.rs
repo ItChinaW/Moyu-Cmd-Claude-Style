@@ -34,7 +34,7 @@ impl ZhihuClient {
             let title = it.target.title_area.text;
             if title.is_empty() { return None; }
             let question_id = question_id_from_url(&it.target.link.url);
-            Some(ListEntry { title, subtitle: it.target.excerpt_area.text, question_id })
+            Some(ListEntry { title, subtitle: it.target.excerpt_area.text, question_id, detail: None })
         }).collect())
     }
 
@@ -54,7 +54,7 @@ impl ZhihuClient {
                 let title = strip_em(&raw_title);
                 if title.is_empty() { return None; }
                 let question_id = obj.question.map(|q| q.id).filter(|id| !id.is_empty());
-                Some(ListEntry { title, subtitle: String::new(), question_id })
+                Some(ListEntry { title, subtitle: String::new(), question_id, detail: None })
             }).collect())
     }
 
@@ -86,15 +86,28 @@ impl ZhihuClient {
             match target.kind.as_str() {
                 "answer" => {
                     let q = target.question?;
-                    let title = q.title;
-                    if title.is_empty() { return None; }
+                    if q.title.is_empty() { return None; }
                     let question_id = if q.id.is_empty() { None } else { Some(q.id) };
-                    Some(ListEntry { title, subtitle: target.excerpt, question_id })
+                    // The card already carries the answer it previewed — build the
+                    // detail from it so opening shows exactly that answer.
+                    let detail = if target.content.is_empty() {
+                        None
+                    } else {
+                        let (body, images) = html::to_text_and_images(&target.content);
+                        Some(DetailView {
+                            author: target.author.name,
+                            voteup: target.voteup_count,
+                            body,
+                            images,
+                            answer_id: target.id,
+                        })
+                    };
+                    Some(ListEntry { title: q.title, subtitle: target.excerpt, question_id, detail })
                 }
                 "article" => {
                     let title = target.title;
                     if title.is_empty() { return None; }
-                    Some(ListEntry { title, subtitle: target.excerpt, question_id: None })
+                    Some(ListEntry { title, subtitle: target.excerpt, question_id: None, detail: None })
                 }
                 _ => None,
             }
