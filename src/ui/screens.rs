@@ -68,33 +68,75 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(List::new(items), area);
 }
 
+/// Truncate to a single display line of at most `cols` terminal columns, cutting
+/// at the first newline and appending `…` if clipped. CJK/wide chars count as 2.
+fn one_line(s: &str, cols: usize) -> String {
+    let mut out = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        if ch == '\n' || ch == '\r' {
+            out.push('…');
+            return out;
+        }
+        let cw = if ch.is_ascii() { 1 } else { 2 };
+        if w + cw > cols {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    out
+}
+
 /// Camouflage skin for the hot list: renders entries as a Claude Code todo list
 /// (`● Update Todos` with ☒/◐/☐ checkboxes). Items above the cursor read as done,
 /// the cursor is the in-progress task, the rest are pending — so scrolling looks
-/// like work advancing. Titles stay fully legible.
+/// like work advancing. Subtitles are clipped to one line so more entries fit, and
+/// a decoy tool-call block is dropped between every group so the page reads like a
+/// real session interleaving todo updates with git/diff work.
 fn draw_list_todos(f: &mut Frame, area: Rect, app: &App) {
+    const GROUP: usize = 5;
     let dim = Style::default().fg(Color::DarkGray);
     let cursor = app.list_cursor();
-    let mut lines: Vec<Line<'static>> = vec![Line::from(vec![
-        Span::styled("● ", Style::default().fg(Color::Green)),
-        Span::styled("Update Todos", Style::default().add_modifier(Modifier::BOLD)),
-    ])];
-    for (i, e) in app.list.iter().enumerate() {
-        let connector = if i == 0 { "  ⎿  " } else { "     " };
-        let (mark, style) = if i < cursor {
-            ("☒ ", dim)
-        } else if i == cursor {
-            ("◐ ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        } else {
-            ("☐ ", Style::default().fg(Color::Gray))
-        };
-        lines.push(Line::from(vec![
-            Span::raw(connector),
-            Span::styled(mark, style),
-            Span::styled(e.title.clone(), style),
-        ]));
-        if !e.subtitle.is_empty() {
-            lines.push(Line::from(Span::styled(format!("        {}", e.subtitle), dim)));
+    // Width budget for the one-line subtitle (8-space indent + small margin).
+    let sub_cols = (area.width as usize).saturating_sub(10).max(20);
+    let header = || {
+        Line::from(vec![
+            Span::styled("● ", Style::default().fg(Color::Green)),
+            Span::styled("Update Todos", Style::default().add_modifier(Modifier::BOLD)),
+        ])
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (g, chunk) in app.list.chunks(GROUP).enumerate() {
+        if g > 0 {
+            // Interleave a Claude-Code tool-call block between todo groups.
+            lines.push(Line::from(""));
+            lines.extend(decoy_block(g - 1));
+            lines.push(Line::from(""));
+        }
+        lines.push(header());
+        for (j, e) in chunk.iter().enumerate() {
+            let i = g * GROUP + j;
+            let connector = if j == 0 { "  ⎿  " } else { "     " };
+            let (mark, style) = if i < cursor {
+                ("☒ ", dim)
+            } else if i == cursor {
+                ("◐ ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            } else {
+                ("☐ ", Style::default().fg(Color::Gray))
+            };
+            lines.push(Line::from(vec![
+                Span::raw(connector),
+                Span::styled(mark, style),
+                Span::styled(one_line(&e.title, sub_cols + 4), style),
+            ]));
+            if !e.subtitle.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("        {}", one_line(&e.subtitle, sub_cols)),
+                    dim,
+                )));
+            }
         }
     }
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
