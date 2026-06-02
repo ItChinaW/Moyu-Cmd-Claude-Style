@@ -42,6 +42,16 @@ pub struct LinkArea {
 #[derive(Debug, Deserialize)]
 pub struct RecommendResponse {
     pub data: Vec<RecommendItem>,
+    #[serde(default)]
+    pub paging: Option<Paging>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct Paging {
+    #[serde(default)]
+    pub is_end: bool,
+    #[serde(default)]
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +194,15 @@ pub struct CommentAuthor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_recommend_paging_next() {
+        let raw = r#"{"data":[],"paging":{"is_end":false,"next":"https://www.zhihu.com/api/v3/feed/topstory/recommend?session_token=abc&after_id=5&action=down&desktop=true"}}"#;
+        let r: RecommendResponse = serde_json::from_str(raw).expect("parse");
+        let p = r.paging.expect("paging present");
+        assert!(!p.is_end);
+        assert!(p.next.unwrap().contains("session_token=abc"));
+    }
 
     #[test]
     fn parses_recommend() {
