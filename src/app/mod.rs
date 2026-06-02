@@ -52,6 +52,10 @@ pub struct App {
     pub image_owner: String,
     /// Recommend rows already shown this session, so refresh never repeats them.
     seen: HashSet<String>,
+    pub active_platform: crate::platform::Platform,
+    /// When a cookie-gated platform was requested without a stored cookie, the
+    /// platform the pending Login screen should connect once a cookie is entered.
+    pub pending_login_platform: Option<crate::platform::Platform>,
 }
 
 impl App {
@@ -69,6 +73,8 @@ impl App {
             image_paths: Vec::new(),
             image_owner: String::new(),
             seen: HashSet::new(),
+            active_platform: crate::platform::Platform::Zhihu,
+            pending_login_platform: None,
         }
     }
 
@@ -99,4 +105,15 @@ impl App {
     pub fn cursor_up(&mut self) { self.list_cursor = self.list_cursor.saturating_sub(1); }
     pub fn selected_entry(&self) -> Option<&ListEntry> { self.list.get(self.list_cursor) }
     pub fn current_detail(&self) -> Option<&DetailView> { self.details.get(self.detail_idx) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_platform_is_zhihu() {
+        let app = App::new();
+        assert_eq!(app.active_platform, crate::platform::Platform::Zhihu);
+    }
 }

@@ -1,6 +1,26 @@
 pub mod html;
 pub mod zhihu;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo }
+
+impl Platform {
+    /// Human label shown in the (non-camouflaged) status line.
+    pub fn label(self) -> &'static str {
+        match self {
+            Platform::Zhihu => "知乎",
+            Platform::V2ex => "V2EX",
+            Platform::Hupu => "虎扑",
+            Platform::Nga => "NGA",
+            Platform::LinuxDo => "Linux.do",
+        }
+    }
+    /// Whether this platform needs a user-supplied cookie.
+    pub fn needs_cookie(self) -> bool {
+        matches!(self, Platform::Zhihu | Platform::Nga | Platform::LinuxDo)
+    }
+}
+
 /// A row in a list screen (hot list or search results).
 #[derive(Debug, Clone)]
 pub struct ListEntry {
