@@ -49,15 +49,15 @@ fn spawn_worker(mut rx: mpsc::UnboundedReceiver<Request>, tx: mpsc::UnboundedSen
 async fn handle(client: &mut Option<ZhihuClient>, req: Request) -> Update {
     match req {
         Request::Connect(cookie) => match ZhihuClient::new(cookie.clone()) {
-            Ok(c) => match c.recommend().await {
-                Ok(list) => { *client = Some(c); Update::Connected { cookie, list } }
+            Ok(c) => match c.recommend(None).await {
+                Ok((list, _next)) => { *client = Some(c); Update::Connected { cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             },
             Err(e) => Update::ConnectFailed(e.to_string()),
         },
         Request::Recommend => match client {
-            Some(c) => match c.recommend().await {
-                Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+            Some(c) => match c.recommend(None).await {
+                Ok((v, _next)) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
             None => Update::Error("未登录".into()),
         },
         Request::HotList => match client {

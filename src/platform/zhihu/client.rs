@@ -78,18 +78,17 @@ impl ZhihuClient {
         }).collect())
     }
 
-    pub async fn recommend(&self) -> Result<Vec<ListEntry>> {
-        let body = self.get("/api/v3/feed/topstory/recommend?action=down&ad_interval=-1&desktop=true").await?;
+    pub async fn recommend(&self, cursor: Option<&str>) -> Result<(Vec<ListEntry>, Option<String>)> {
+        let body = self.get(&recommend_path(cursor)).await?;
         let resp: model::RecommendResponse = serde_json::from_str(&body)?;
-        Ok(resp.data.into_iter().filter_map(|item| {
+        let next = resp.paging.and_then(|p| if p.is_end { None } else { p.next });
+        let entries = resp.data.into_iter().filter_map(|item| {
             let target = item.target;
             match target.kind.as_str() {
                 "answer" => {
                     let q = target.question?;
                     if q.title.is_empty() { return None; }
                     let open_token = if q.id.is_empty() { None } else { Some(q.id) };
-                    // The card already carries the answer it previewed — build the
-                    // detail from it so opening shows exactly that answer.
                     let detail = if target.content.is_empty() {
                         None
                     } else {
@@ -97,8 +96,7 @@ impl ZhihuClient {
                         Some(DetailView {
                             author: target.author.name,
                             voteup: target.voteup_count,
-                            body,
-                            images,
+                            body, images,
                             answer_id: target.id,
                         })
                     };
@@ -111,7 +109,8 @@ impl ZhihuClient {
                 }
                 _ => None,
             }
-        }).collect())
+        }).collect();
+        Ok((entries, next))
     }
 
     pub async fn comments(&self, answer_id: &str) -> Result<Vec<CommentView>> {
@@ -126,6 +125,20 @@ impl ZhihuClient {
             like_count: c.like_count,
             child_count: c.child_comment_count,
         }).collect())
+    }
+}
+
+/// Path+query for a recommend request: the server-provided `next` URL's path when
+/// paging, else the default first-page path.
+fn recommend_path(cursor: Option<&str>) -> String {
+    match cursor {
+        Some(next) if next.starts_with("http") => {
+            match next.find("/api/") {
+                Some(i) => next[i..].to_string(),
+                None => next.to_string(),
+            }
+        }
+        _ => "/api/v3/feed/topstory/recommend?action=down&ad_interval=-1&desktop=true".to_string(),
     }
 }
 
@@ -151,6 +164,19 @@ fn strip_em(s: &str) -> String { s.replace("<em>", "").replace("</em>", "") }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recommend_path_uses_cursor_when_present() {
+        assert_eq!(
+            recommend_path(None),
+            "/api/v3/feed/topstory/recommend?action=down&ad_interval=-1&desktop=true"
+        );
+        let next = "https://www.zhihu.com/api/v3/feed/topstory/recommend?session_token=abc&after_id=5&action=down&desktop=true";
+        assert_eq!(
+            recommend_path(Some(next)),
+            "/api/v3/feed/topstory/recommend?session_token=abc&after_id=5&action=down&desktop=true"
+        );
+    }
 
     #[test]
     fn extracts_question_id_from_url() {
@@ -203,7 +229,7 @@ mod tests {
     async fn live_recommend() {
         let Some(cookie) = live_cookie() else { eprintln!("skip: no cookie"); return; };
         let client = ZhihuClient::new(cookie).expect("client");
-        let results = client.recommend().await.expect("recommend");
+        let (results, _next) = client.recommend(None).await.expect("recommend");
         assert!(!results.is_empty(), "recommend should return entries");
         for e in &results {
             eprintln!("recommend: {} (qid={:?})", e.title, e.open_token);
