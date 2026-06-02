@@ -34,12 +34,25 @@ moyu
 |------|------|
 | `↑` `↓` | 列表选择 / 正文滚动 |
 | `Enter` | 进入选中的问题详情(命令行为空时);否则执行命令 |
-| `→` / `Tab` | 在详情页查看评论 |
+| `→` / `Tab` | 在详情页查看评论(知乎) |
 | `←` / `Esc` | 返回上一级 |
-| `/search 关键词` | 搜索 |
+| `r` | 刷新 / 翻下一页(知乎推荐为真翻页,不再重复) |
+| `1`-`9` | 在编辑器打开详情页第 N 张图 |
+| `/search 关键词` | 搜索(知乎) |
 | `/login` | 重新登录(粘贴新 Cookie 切换账号,覆盖旧的) |
-| `/zhihu` | 进入知乎热榜 |
+| `/zhihu` | 知乎 |
+| `/v2ex` | V2EX |
+| `/hupu` | 虎扑 |
+| `/nga` | NGA(需 cookie) |
+| `/linuxdo` | Linux.do(需 cookie) |
 | `/quit` / `q` | 退出 |
+
+## 多平台
+
+支持知乎、V2EX、虎扑、NGA、Linux.do,统一「列表 → 详情」交互。论坛帖子(V2EX/虎扑/NGA/Linux.do)的主楼与楼层回复拼成一页正文,可整页滚动。
+
+- **V2EX / 虎扑**:无需 cookie,直接 `/v2ex`、`/hupu` 即可。
+- **NGA / Linux.do**:需各自的登录 cookie。首次 `/nga`、`/linuxdo` 会进入登录流程,粘贴对应站点的 cookie 回车(NGA 需登录态,含真实 `ngaPassportUid`/`ngaPassportCid`;Linux.do 需含 `_t`/`_forum_session` 等)。各平台 cookie 独立保存。
 
 ## 配置
 
@@ -51,6 +64,12 @@ Cookie 明文保存在:
 
 ```toml
 [zhihu]
+cookie = "..."
+
+[nga]
+cookie = "..."
+
+[linuxdo]
 cookie = "..."
 ```
 
