@@ -400,7 +400,7 @@ fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
         return;
     }
     let entry = match app.selected_entry() {
-        Some(e) => (e.detail.clone(), e.question_id.clone()),
+        Some(e) => (e.detail.clone(), e.open_token.clone()),
         None => return,
     };
     match entry {
@@ -483,7 +483,7 @@ mod tests {
         ListEntry {
             title: title.into(),
             subtitle: String::new(),
-            question_id: qid.map(|s| s.to_string()),
+            open_token: qid.map(|s| s.to_string()),
             detail: None,
         }
     }
@@ -761,7 +761,7 @@ mod tests {
         app.set_list(vec![ListEntry {
             title: "问题标题".into(),
             subtitle: "预览摘要".into(),
-            question_id: Some("100".into()),
+            open_token: Some("100".into()),
             detail: Some(DetailView {
                 author: "作者".into(),
                 voteup: 5,

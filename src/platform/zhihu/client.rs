@@ -33,8 +33,8 @@ impl ZhihuClient {
         Ok(resp.data.into_iter().filter_map(|it| {
             let title = it.target.title_area.text;
             if title.is_empty() { return None; }
-            let question_id = question_id_from_url(&it.target.link.url);
-            Some(ListEntry { title, subtitle: it.target.excerpt_area.text, question_id, detail: None })
+            let open_token = question_id_from_url(&it.target.link.url);
+            Some(ListEntry { title, subtitle: it.target.excerpt_area.text, open_token, detail: None })
         }).collect())
     }
 
@@ -53,8 +53,8 @@ impl ZhihuClient {
                     .unwrap_or(obj.title);
                 let title = strip_em(&raw_title);
                 if title.is_empty() { return None; }
-                let question_id = obj.question.map(|q| q.id).filter(|id| !id.is_empty());
-                Some(ListEntry { title, subtitle: String::new(), question_id, detail: None })
+                let open_token = obj.question.map(|q| q.id).filter(|id| !id.is_empty());
+                Some(ListEntry { title, subtitle: String::new(), open_token, detail: None })
             }).collect())
     }
 
@@ -87,7 +87,7 @@ impl ZhihuClient {
                 "answer" => {
                     let q = target.question?;
                     if q.title.is_empty() { return None; }
-                    let question_id = if q.id.is_empty() { None } else { Some(q.id) };
+                    let open_token = if q.id.is_empty() { None } else { Some(q.id) };
                     // The card already carries the answer it previewed — build the
                     // detail from it so opening shows exactly that answer.
                     let detail = if target.content.is_empty() {
@@ -102,12 +102,12 @@ impl ZhihuClient {
                             answer_id: target.id,
                         })
                     };
-                    Some(ListEntry { title: q.title, subtitle: target.excerpt, question_id, detail })
+                    Some(ListEntry { title: q.title, subtitle: target.excerpt, open_token, detail })
                 }
                 "article" => {
                     let title = target.title;
                     if title.is_empty() { return None; }
-                    Some(ListEntry { title, subtitle: target.excerpt, question_id: None, detail: None })
+                    Some(ListEntry { title, subtitle: target.excerpt, open_token: None, detail: None })
                 }
                 _ => None,
             }
@@ -180,10 +180,10 @@ mod tests {
         let client = ZhihuClient::new(cookie).expect("client");
         let hot = client.hot_list().await.expect("hot list");
         assert!(!hot.is_empty(), "hot list should not be empty");
-        eprintln!("hot[0] = {} (qid={:?})", hot[0].title, hot[0].question_id);
+        eprintln!("hot[0] = {} (qid={:?})", hot[0].title, hot[0].open_token);
 
         // find a hot entry that has a question id, fetch its answers
-        let qid = hot.iter().find_map(|e| e.question_id.clone()).expect("a question id in hot list");
+        let qid = hot.iter().find_map(|e| e.open_token.clone()).expect("a question id in hot list");
         let answers = client.answers(&qid).await.expect("answers");
         eprintln!("got {} answers for q{}", answers.len(), qid);
         for (i, a) in answers.iter().enumerate() {
@@ -206,7 +206,7 @@ mod tests {
         let results = client.recommend().await.expect("recommend");
         assert!(!results.is_empty(), "recommend should return entries");
         for e in &results {
-            eprintln!("recommend: {} (qid={:?})", e.title, e.question_id);
+            eprintln!("recommend: {} (qid={:?})", e.title, e.open_token);
         }
     }
 
@@ -217,6 +217,6 @@ mod tests {
         let client = ZhihuClient::new(cookie).expect("client");
         let results = client.search("程序员").await.expect("search");
         assert!(!results.is_empty(), "search should return results");
-        eprintln!("search[0] = {} (qid={:?})", results[0].title, results[0].question_id);
+        eprintln!("search[0] = {} (qid={:?})", results[0].title, results[0].open_token);
     }
 }

@@ -13,7 +13,7 @@ fn entry_key(e: &ListEntry) -> String {
             return format!("a:{}", d.answer_id);
         }
     }
-    if let Some(q) = &e.question_id {
+    if let Some(q) = &e.open_token {
         return format!("q:{q}");
     }
     format!("t:{}", e.title)

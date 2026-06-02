@@ -15,7 +15,7 @@ mod tests {
     use crate::platform::ListEntry;
 
     fn entry(t: &str) -> ListEntry {
-        ListEntry { title: t.into(), subtitle: String::new(), question_id: Some("1".to_string()), detail: None }
+        ListEntry { title: t.into(), subtitle: String::new(), open_token: Some("1".to_string()), detail: None }
     }
 
     #[test]
