@@ -44,6 +44,10 @@ fn draw_login(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_list(f: &mut Frame, area: Rect, app: &App) {
+    if app.camouflage {
+        draw_list_todos(f, area, app);
+        return;
+    }
     let items: Vec<ListItem> = app.list.iter().enumerate().map(|(i, e)| {
         let marker = if i == app.list_cursor() { "> " } else { "  " };
         let style = if i == app.list_cursor() {
@@ -64,6 +68,38 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(List::new(items), area);
 }
 
+/// Camouflage skin for the hot list: renders entries as a Claude Code todo list
+/// (`● Update Todos` with ☒/◐/☐ checkboxes). Items above the cursor read as done,
+/// the cursor is the in-progress task, the rest are pending — so scrolling looks
+/// like work advancing. Titles stay fully legible.
+fn draw_list_todos(f: &mut Frame, area: Rect, app: &App) {
+    let dim = Style::default().fg(Color::DarkGray);
+    let cursor = app.list_cursor();
+    let mut lines: Vec<Line<'static>> = vec![Line::from(vec![
+        Span::styled("● ", Style::default().fg(Color::Green)),
+        Span::styled("Update Todos", Style::default().add_modifier(Modifier::BOLD)),
+    ])];
+    for (i, e) in app.list.iter().enumerate() {
+        let connector = if i == 0 { "  ⎿  " } else { "     " };
+        let (mark, style) = if i < cursor {
+            ("☒ ", dim)
+        } else if i == cursor {
+            ("◐ ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        } else {
+            ("☐ ", Style::default().fg(Color::Gray))
+        };
+        lines.push(Line::from(vec![
+            Span::raw(connector),
+            Span::styled(mark, style),
+            Span::styled(e.title.clone(), style),
+        ]));
+        if !e.subtitle.is_empty() {
+            lines.push(Line::from(Span::styled(format!("        {}", e.subtitle), dim)));
+        }
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+}
+
 /// One authentic-looking Claude Code transcript block (rotated by index), styled to
 /// match a real session: colored ● bullets, bold tool names, ⎿ result lines,
 /// Error/Exit codes, git diff stats, "+N lines (ctrl+o to expand)". Uses the user's
@@ -74,9 +110,14 @@ fn decoy_block(i: usize) -> Vec<Line<'static>> {
     let dim = Style::default().fg(Color::DarkGray);
     let pink = Style::default().fg(Color::LightRed);
     let bold = Style::default().add_modifier(Modifier::BOLD);
+    // Dark red/green diff bars (truecolor; old terminals fall back to fg only).
+    let del = Style::default().fg(Color::Rgb(245, 215, 215)).bg(Color::Rgb(74, 20, 20));
+    let add = Style::default().fg(Color::Rgb(215, 245, 220)).bg(Color::Rgb(18, 58, 30));
+    // Trailing-pad each diff row so the colored bar reads as a full line.
+    let row = |s: &str, st: Style| Line::from(Span::styled(format!("{s:<64}"), st));
     let bullet = |c: Color| Span::styled("● ", Style::default().fg(c));
     let repo = "http://gitlab.internal:3000/web/admin-portal.git";
-    match i % 6 {
+    match i % 7 {
         0 => vec![Line::from(vec![
             bullet(Color::Gray),
             Span::styled("Changes look consistent. Committing:", Style::default().fg(Color::Gray)),
@@ -109,11 +150,22 @@ fn decoy_block(i: usize) -> Vec<Line<'static>> {
             Line::from(Span::styled("       +   const [loading, setLoading] = useState(false)", green)),
             Line::from(Span::styled("       -   onClose={() => setOpen(false)}", red)),
         ],
-        _ => vec![
+        5 => vec![
             Line::from(vec![bullet(Color::Red), Span::styled("Bash", bold),
                 Span::raw("(sleep 5 && git push 2>&1; git status)")]),
             Line::from(vec![Span::styled("  ⎿  ", dim), Span::styled("Error: Exit code 128", red)]),
             Line::from(Span::styled(format!("     fatal: unable to access '{repo}/': Empty reply from server"), pink)),
+        ],
+        _ => vec![
+            Line::from(vec![bullet(Color::Green), Span::styled("Update", bold),
+                Span::raw("(app/admin/finance/page.tsx)")]),
+            Line::from(Span::styled("  ⎿  Added 2 lines, removed 4 lines", dim)),
+            row("    367 -        styles: {", del),
+            row("    368 -          root: { maxWidth: 360 },", del),
+            row("    369 -          body: { maxHeight: \"40vh\", overflowY: \"auto\" },", del),
+            row("    370 -        },", del),
+            row("    367 +        overlayStyle: { maxWidth: 360 },", add),
+            row("    368 +        overlayInnerStyle: { maxHeight: \"40vh\", overflowY: \"auto\" },", add),
         ],
     }
 }

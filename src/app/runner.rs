@@ -194,6 +194,10 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 if !app.cookie.is_empty() {
                     refresh(app, req_tx);
                 }
+            } else if c == 'c'
+                && matches!(app.screen(), Screen::Detail | Screen::List)
+            {
+                app.camouflage = !app.camouflage;
             } else if *app.screen() == Screen::Detail {
                 if c == 'n' && app.detail_idx + 1 < app.details.len() {
                     app.detail_idx += 1;
@@ -201,8 +205,6 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 } else if c == 'p' {
                     app.detail_idx = app.detail_idx.saturating_sub(1);
                     app.detail_scroll = 0;
-                } else if c == 'c' {
-                    app.camouflage = !app.camouflage;
                 } else if let Some(url) = image_for_digit(app.current_detail(), c) {
                     open_url(&url);
                 }
