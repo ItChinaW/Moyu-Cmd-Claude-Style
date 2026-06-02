@@ -1,5 +1,5 @@
 pub mod client;
 pub mod cookie;
-pub mod html;
+pub use crate::platform::html;
 pub mod model;
 pub mod sign;

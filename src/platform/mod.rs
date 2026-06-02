@@ -1,3 +1,4 @@
+pub mod html;
 pub mod zhihu;
 
 /// A row in a list screen (hot list or search results).
