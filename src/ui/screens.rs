@@ -29,7 +29,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_root(f: &mut Frame, area: Rect) {
-    f.render_widget(Paragraph::new("输入 /zhihu 进入知乎"), area);
+    f.render_widget(
+        Paragraph::new("输入 /zhihu 进入知乎，或 /v2ex /hupu /nga /linuxdo 切换平台（/help 查看全部命令）")
+            .wrap(Wrap { trim: true }),
+        area,
+    );
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
