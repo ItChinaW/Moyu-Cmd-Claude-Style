@@ -51,6 +51,25 @@ impl HttpClient {
         }
         Ok(body)
     }
+
+    /// GET an arbitrary URL (e.g. an image) and return the raw bytes. Sends a Zhihu
+    /// referer so hotlink-protected image CDNs (zhimg.com) serve the file.
+    pub async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        let resp = self
+            .inner
+            .get(url)
+            .header("referer", HOST)
+            .header("user-agent", USER_AGENT)
+            .send()
+            .await
+            .context("send image request")?;
+        let status = resp.status();
+        let bytes = resp.bytes().await.context("read image bytes")?;
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status} fetching image");
+        }
+        Ok(bytes.to_vec())
+    }
 }
 
 #[cfg(test)]

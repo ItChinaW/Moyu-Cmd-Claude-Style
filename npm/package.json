@@ -1,6 +1,6 @@
 {
   "name": "moyu-fish",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "在终端里摸鱼的知乎客户端,带 Claude Code 风格伪装与老板键",
   "bin": {
     "moyu": "bin/moyu.js"

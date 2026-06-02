@@ -18,6 +18,7 @@ pub enum Request {
     Search(String),
     Answers(String),     // question id
     Comments(String),    // answer id
+    FetchImages { answer_id: String, urls: Vec<String> },
 }
 
 pub enum Update {
@@ -26,6 +27,7 @@ pub enum Update {
     List(Vec<ListEntry>),
     Details(Vec<DetailView>),
     Comments(Vec<CommentView>),
+    ImagesReady { answer_id: String, paths: Vec<String> },
     Error(String),
 }
 
@@ -78,7 +80,54 @@ async fn handle(client: &mut Option<ZhihuClient>, req: Request) -> Update {
                 Ok(v) => Update::Comments(v), Err(e) => Update::Error(e.to_string()) },
             None => Update::Error("未登录".into()),
         },
+        Request::FetchImages { answer_id, urls } => {
+            let paths = match client {
+                Some(c) => download_images(c, &urls).await,
+                None => Vec::new(),
+            };
+            Update::ImagesReady { answer_id, paths }
+        }
     }
+}
+
+/// Local cache dir for the *currently viewed* answer's images. Wiped on each new
+/// fetch so the disk only ever holds one article's images.
+fn image_cache_dir() -> std::path::PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("touch-fish")
+        .join("img")
+}
+
+/// File extension from a URL, defaulting to `jpg` for anything unusual.
+fn url_ext(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let ext = path.rsplit('.').next().unwrap_or("jpg");
+    if !ext.is_empty() && ext.len() <= 4 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ext.to_ascii_lowercase()
+    } else {
+        "jpg".into()
+    }
+}
+
+/// Clear the cache dir, then download every URL into it. Returns local paths
+/// index-aligned with `urls`; a failed download yields an empty string in its slot.
+async fn download_images(client: &ZhihuClient, urls: &[String]) -> Vec<String> {
+    let dir = image_cache_dir();
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return Vec::new();
+    }
+    let mut paths = Vec::with_capacity(urls.len());
+    for (i, url) in urls.iter().enumerate() {
+        let file = dir.join(format!("{:02}.{}", i + 1, url_ext(url)));
+        let ok = match client.download_image(url).await {
+            Ok(bytes) => std::fs::write(&file, &bytes).is_ok(),
+            Err(_) => false,
+        };
+        paths.push(if ok { file.to_string_lossy().into_owned() } else { String::new() });
+    }
+    paths
 }
 
 pub async fn run_app(cookie: String) -> Result<()> {
@@ -122,7 +171,7 @@ pub async fn run_app(cookie: String) -> Result<()> {
                     _ => {}
                 }
             }
-            Some(upd) = upd_rx.recv() => apply_update(&mut app, upd),
+            Some(upd) = upd_rx.recv() => apply_update(&mut app, upd, &req_tx),
             _ = tick.tick() => {}
         }
     };
@@ -132,7 +181,22 @@ pub async fn run_app(cookie: String) -> Result<()> {
     result
 }
 
-fn apply_update(app: &mut App, upd: Update) {
+/// Drop any stale image paths and request a fresh download for the answer now on
+/// screen. New paths arrive asynchronously via `Update::ImagesReady`.
+fn request_images(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
+    app.image_paths.clear();
+    app.image_owner.clear();
+    if let Some(d) = app.current_detail() {
+        if !d.images.is_empty() {
+            let _ = req_tx.send(Request::FetchImages {
+                answer_id: d.answer_id.clone(),
+                urls: d.images.clone(),
+            });
+        }
+    }
+}
+
+fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Request>) {
     app.loading = false;
     match upd {
         Update::Connected { cookie, list } => {
@@ -161,6 +225,14 @@ fn apply_update(app: &mut App, upd: Update) {
         Update::Details(d) => {
             app.error = None; app.details = d; app.detail_idx = 0; app.detail_scroll = 0;
             app.push(Screen::Detail);
+            request_images(app, req_tx);
+        }
+        Update::ImagesReady { answer_id, paths } => {
+            // Adopt only if these still belong to the answer currently on screen.
+            if app.current_detail().map(|d| d.answer_id.as_str()) == Some(answer_id.as_str()) {
+                app.image_paths = paths;
+                app.image_owner = answer_id;
+            }
         }
         Update::Comments(c) => {
             app.error = None; app.comments = c; app.comment_scroll = 0;
@@ -202,11 +274,14 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 if c == 'n' && app.detail_idx + 1 < app.details.len() {
                     app.detail_idx += 1;
                     app.detail_scroll = 0;
-                } else if c == 'p' {
-                    app.detail_idx = app.detail_idx.saturating_sub(1);
+                    request_images(app, req_tx);
+                } else if c == 'p' && app.detail_idx > 0 {
+                    app.detail_idx -= 1;
                     app.detail_scroll = 0;
-                } else if let Some(url) = image_for_digit(app.current_detail(), c) {
-                    open_url(&url);
+                    request_images(app, req_tx);
+                } else if let Some(path) = image_path_for_digit(app, c) {
+                    // Open in the surrounding editor (tab), like clicking the path.
+                    open_image(&path);
                 }
             }
         }
@@ -267,15 +342,52 @@ fn open_url(url: &str) {
     let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
 }
 
+/// Open a local image in the surrounding editor (VS Code / Cursor / Windsurf / …)
+/// so it lands in an editor tab — same as clicking the path — instead of the OS
+/// default viewer (Preview). Falls back to the OS default if no editor CLI is found.
+fn open_image(path: &str) {
+    // Hint which editor we're inside from VS Code-family env vars / the macOS bundle id.
+    let hint = std::env::var("VSCODE_GIT_ASKPASS_MAIN")
+        .or_else(|_| std::env::var("VSCODE_GIT_ASKPASS_NODE"))
+        .or_else(|_| std::env::var("__CFBundleIdentifier"))
+        .unwrap_or_default()
+        .to_lowercase();
+    let preferred = if hint.contains("cursor") {
+        "cursor"
+    } else if hint.contains("windsurf") {
+        "windsurf"
+    } else if hint.contains("insiders") {
+        "code-insiders"
+    } else {
+        "code"
+    };
+    let mut tried: Vec<&str> = Vec::new();
+    for cli in std::iter::once(preferred).chain(["code", "cursor", "windsurf", "code-insiders"]) {
+        if tried.contains(&cli) {
+            continue;
+        }
+        tried.push(cli);
+        // `-r` reuses the current window so it opens as a tab, not a new window.
+        if std::process::Command::new(cli).arg("-r").arg(path).spawn().is_ok() {
+            return;
+        }
+    }
+    open_url(path); // no editor CLI on PATH → OS default app
+}
+
 /// Pure helper: given the current detail view and a digit character, return the
 /// corresponding image URL (1-based). Returns None for non-digit chars, '0', or
 /// out-of-range indices.
-fn image_for_digit(detail: Option<&DetailView>, c: char) -> Option<String> {
+/// Local image path for digit key `c` (1-based), or None if absent / failed download.
+fn image_path_for_digit(app: &App, c: char) -> Option<String> {
     let d = c.to_digit(10)?;
     if d < 1 {
         return None;
     }
-    detail?.images.get((d - 1) as usize).cloned()
+    app.image_paths
+        .get((d - 1) as usize)
+        .filter(|p| !p.is_empty())
+        .cloned()
 }
 
 fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
@@ -557,8 +669,9 @@ mod tests {
     #[test]
     fn apply_list_update_from_login_replaces_to_list() {
         let mut app = App::new();
+        let (tx, _rx) = make_channel();
         app.replace(Screen::Login);
-        apply_update(&mut app, Update::List(vec![entry("t", None)]));
+        apply_update(&mut app, Update::List(vec![entry("t", None)]), &tx);
         assert_eq!(app.screen(), &Screen::List);
         assert_eq!(app.list.len(), 1);
     }
@@ -567,41 +680,64 @@ mod tests {
     #[test]
     fn apply_details_update_pushes_detail() {
         let mut app = App::new();
+        let (tx, _rx) = make_channel();
         apply_update(&mut app, Update::Details(vec![DetailView {
             author: "a".into(),
             voteup: 1,
             body: "b".into(),
             images: vec![],
             answer_id: "9".into(),
-        }]));
+        }]), &tx);
         assert_eq!(app.screen(), &Screen::Detail);
         assert!(app.current_detail().is_some());
     }
 
-    // 13. image_for_digit returns correct url
+    // 13. image_path_for_digit returns the matching local path, skipping empty/failed slots
     #[test]
-    fn image_for_digit_returns_correct_url() {
-        let dv = DetailView {
+    fn image_path_for_digit_returns_correct_path() {
+        let mut app = App::new();
+        app.image_paths = vec!["/c/1.jpg".into(), String::new(), "/c/3.jpg".into()];
+        assert_eq!(image_path_for_digit(&app, '1'), Some("/c/1.jpg".into()));
+        assert_eq!(image_path_for_digit(&app, '2'), None); // empty = failed download
+        assert_eq!(image_path_for_digit(&app, '3'), Some("/c/3.jpg".into()));
+        assert_eq!(image_path_for_digit(&app, '4'), None);
+        assert_eq!(image_path_for_digit(&app, '0'), None);
+        assert_eq!(image_path_for_digit(&app, 'x'), None);
+    }
+
+    // 14. FetchImages clears stale paths and is requested for an answer with images
+    #[test]
+    fn request_images_sends_fetch_and_clears_stale() {
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        app.details = vec![DetailView {
             author: "a".into(),
             voteup: 0,
             body: "b".into(),
-            images: vec!["u1".into(), "u2".into()],
-            answer_id: "1".into(),
-        };
-        assert_eq!(image_for_digit(Some(&dv), '1'), Some("u1".into()));
-        assert_eq!(image_for_digit(Some(&dv), '2'), Some("u2".into()));
-        assert_eq!(image_for_digit(Some(&dv), '3'), None);
-        assert_eq!(image_for_digit(Some(&dv), '0'), None);
-        assert_eq!(image_for_digit(Some(&dv), 'x'), None);
-        assert_eq!(image_for_digit(None, '1'), None);
+            images: vec!["https://pic/a.jpg".into()],
+            answer_id: "42".into(),
+        }];
+        app.image_paths = vec!["/old.jpg".into()];
+        app.image_owner = "old".into();
+        request_images(&mut app, &tx);
+        assert!(app.image_paths.is_empty(), "stale paths cleared");
+        assert!(app.image_owner.is_empty());
+        match rx.try_recv() {
+            Ok(Request::FetchImages { answer_id, urls }) => {
+                assert_eq!(answer_id, "42");
+                assert_eq!(urls, vec!["https://pic/a.jpg".to_string()]);
+            }
+            other => panic!("expected FetchImages, got {:?}", other),
+        }
     }
 
     // 12. apply_error_update_sets_error_without_navigating
     #[test]
     fn apply_error_update_sets_error_without_navigating() {
         let mut app = App::new();
+        let (tx, _rx) = make_channel();
         // app starts at Root
-        apply_update(&mut app, Update::Error("boom".into()));
+        apply_update(&mut app, Update::Error("boom".into()), &tx);
         assert_eq!(app.error.as_deref(), Some("boom"));
         assert_eq!(app.screen(), &Screen::Root);
     }

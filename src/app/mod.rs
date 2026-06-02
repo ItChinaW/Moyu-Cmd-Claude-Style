@@ -30,6 +30,11 @@ pub struct App {
     pub boss_mode: bool,
     /// Camouflage: interleave dim Claude-Code-style decoy lines into the answer body.
     pub camouflage: bool,
+    /// Local file paths of the current answer's downloaded images, index-aligned with
+    /// `current_detail().images`. Empty string = that image failed to download.
+    pub image_paths: Vec<String>,
+    /// answer_id that `image_paths` belong to — guards against stale async results.
+    pub image_owner: String,
 }
 
 impl App {
@@ -44,6 +49,8 @@ impl App {
             list_source: ListSource::Recommend,
             boss_mode: false,
             camouflage: true,
+            image_paths: Vec::new(),
+            image_owner: String::new(),
         }
     }
 

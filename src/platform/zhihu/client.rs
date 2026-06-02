@@ -22,6 +22,11 @@ impl ZhihuClient {
         self.http.signed_get(path, &self.cookie, &sig).await
     }
 
+    /// Download an image URL, returning the raw bytes.
+    pub async fn download_image(&self, url: &str) -> Result<Vec<u8>> {
+        self.http.fetch_bytes(url).await
+    }
+
     pub async fn hot_list(&self) -> Result<Vec<ListEntry>> {
         let body = self.get("/api/v3/feed/topstory/hot-lists/total?limit=50&desktop=true").await?;
         let resp: model::HotListResponse = serde_json::from_str(&body)?;
@@ -60,13 +65,9 @@ impl ZhihuClient {
         let body = self.get(&path).await?;
         let resp: model::AnswersResponse = serde_json::from_str(&body)?;
         Ok(resp.data.into_iter().map(|f| {
-            let (mut body, images) = html::to_text_and_images(&f.target.content);
-            if !images.is_empty() {
-                body.push_str("\n\n──── 图片(按数字键在浏览器打开)────\n");
-                for (i, u) in images.iter().enumerate() {
-                    body.push_str(&format!("【图{}】 {}\n", i + 1, u));
-                }
-            }
+            // Body keeps the inline 【图N】 markers; the clickable image list is
+            // rendered by the UI from locally-downloaded paths, not baked in here.
+            let (body, images) = html::to_text_and_images(&f.target.content);
             DetailView {
                 author: f.target.author.name,
                 voteup: f.target.voteup_count,

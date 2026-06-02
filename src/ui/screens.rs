@@ -246,10 +246,40 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App) {
             lines.push(Line::from(src.to_string()));
         }
     }
+    append_image_section(&mut lines, app);
     let p = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((app.detail_scroll, 0));
     f.render_widget(p, area);
+}
+
+/// Render the current answer's images as a footer of local file paths. Editors
+/// (VS Code etc.) turn an existing absolute path into a clickable link that opens
+/// the image in an editor tab — a remote URL would only open a browser, so we show
+/// the downloaded local path. Falls back to digit keys 1-9.
+fn append_image_section(lines: &mut Vec<Line<'static>>, app: &App) {
+    let dim = Style::default().fg(Color::DarkGray);
+    let Some(d) = app.current_detail() else { return };
+    if d.images.is_empty() {
+        return;
+    }
+    let ready = app.image_owner == d.answer_id;
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "──── 图片(点击路径在编辑器打开 · 或按数字键 1-9)────",
+        dim,
+    )));
+    for i in 0..d.images.len() {
+        let label = format!("【图{}】 ", i + 1);
+        let value = match (ready, app.image_paths.get(i)) {
+            (true, Some(p)) if !p.is_empty() => {
+                Span::styled(p.clone(), Style::default().fg(Color::Cyan))
+            }
+            (true, _) => Span::styled("(下载失败)".to_string(), dim),
+            (false, _) => Span::styled("下载中…".to_string(), dim),
+        };
+        lines.push(Line::from(vec![Span::styled(label, dim), value]));
+    }
 }
 
 fn draw_comments(f: &mut Frame, area: Rect, app: &App) {
