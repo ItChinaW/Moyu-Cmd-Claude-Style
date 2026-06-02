@@ -1,5 +1,9 @@
 pub mod html;
 pub mod zhihu;
+pub mod v2ex;
+pub mod hupu;
+pub mod nga;
+pub mod linuxdo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo }

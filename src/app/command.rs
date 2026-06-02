@@ -7,6 +7,10 @@ pub fn parse(line: &str) -> Command {
     };
     match head {
         "/zhihu" => Command::Zhihu,
+        "/v2ex" => Command::V2ex,
+        "/hupu" => Command::Hupu,
+        "/nga" => Command::Nga,
+        "/linuxdo" => Command::LinuxDo,
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
@@ -21,6 +25,10 @@ pub fn parse(line: &str) -> Command {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Zhihu,
+    V2ex,
+    Hupu,
+    Nga,
+    LinuxDo,
     Hot,
     Refresh,
     Search(String),

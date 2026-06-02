@@ -4,6 +4,7 @@ use crate::app::command::{self, Command};
 use crate::app::state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
 use crate::platform::zhihu::client::ZhihuClient;
+use crate::platform::Platform;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -12,17 +13,25 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum Request {
-    Connect(String),     // cookie
-    Recommend,
+    /// Connect/verify a cookie for a platform, then load its default list.
+    Connect { platform: Platform, cookie: String },
+    /// Load the default/first page for a platform (resets cursor).
+    List(Platform),
+    /// Load the next page (uses stored cursor); falls back to first page.
+    More(Platform),
+    /// Zhihu-only: hot list.
     HotList,
+    /// Zhihu-only: search.
     Search(String),
-    Answers(String),     // question id
-    Comments(String),    // answer id
+    /// Open a row: fetch its detail(s) given the open token.
+    Detail { platform: Platform, token: String },
+    /// Zhihu-only: comments for an answer id.
+    Comments(String),
     FetchImages { answer_id: String, urls: Vec<String> },
 }
 
 pub enum Update {
-    Connected { cookie: String, list: Vec<ListEntry> },
+    Connected { platform: Platform, cookie: String, list: Vec<ListEntry> },
     ConnectFailed(String),
     List(Vec<ListEntry>),
     Details(Vec<DetailView>),
@@ -31,63 +40,135 @@ pub enum Update {
     Error(String),
 }
 
-/// Worker thread: owns the `!Send` ZhihuClient, serves requests on its own runtime.
+#[derive(Default)]
+struct Sources {
+    zhihu: Option<ZhihuClient>,
+    zhihu_cursor: Option<String>,
+    nga_cookie: String,
+    nga_page: u32,
+    linuxdo_cookie: String,
+    http: Option<crate::net::HttpClient>,
+}
+
+impl Sources {
+    fn http(&mut self) -> crate::net::HttpClient {
+        if self.http.is_none() {
+            self.http = crate::net::HttpClient::new().ok();
+        }
+        self.http.clone().expect("http client")
+    }
+}
+
+/// Worker thread: owns the `!Send` sources, serves requests on its own runtime.
 fn spawn_worker(mut rx: mpsc::UnboundedReceiver<Request>, tx: mpsc::UnboundedSender<Update>) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all().build().expect("worker runtime");
         rt.block_on(async move {
-            let mut client: Option<ZhihuClient> = None;
+            let mut src = Sources::default();
             while let Some(req) = rx.recv().await {
-                let upd = handle(&mut client, req).await;
+                let upd = handle(&mut src, req).await;
                 if tx.send(upd).is_err() { break; }
             }
         });
     });
 }
 
-async fn handle(client: &mut Option<ZhihuClient>, req: Request) -> Update {
+async fn handle(src: &mut Sources, req: Request) -> Update {
     match req {
-        Request::Connect(cookie) => match ZhihuClient::new(cookie.clone()) {
+        Request::Connect { platform, cookie } => connect(src, platform, cookie).await,
+        Request::List(p) => { reset_cursor(src, p); load_list(src, p).await }
+        Request::More(p) => load_list(src, p).await,
+        Request::HotList => match &src.zhihu {
+            Some(c) => match c.hot_list().await { Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+            None => Update::Error("未登录知乎".into()),
+        },
+        Request::Search(q) => match &src.zhihu {
+            Some(c) => match c.search(&q).await { Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+            None => Update::Error("未登录知乎".into()),
+        },
+        Request::Detail { platform, token } => load_detail(src, platform, &token).await,
+        Request::Comments(id) => match &src.zhihu {
+            Some(c) => match c.comments(&id).await { Ok(v) => Update::Comments(v), Err(e) => Update::Error(e.to_string()) },
+            None => Update::Error("未登录知乎".into()),
+        },
+        Request::FetchImages { answer_id, urls } => {
+            let http = src.http();
+            let paths = download_images(&http, &urls).await;
+            Update::ImagesReady { answer_id, paths }
+        }
+    }
+}
+
+fn reset_cursor(src: &mut Sources, p: Platform) {
+    match p { Platform::Zhihu => src.zhihu_cursor = None, Platform::Nga => src.nga_page = 1, _ => {} }
+}
+
+async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Update {
+    match platform {
+        Platform::Zhihu => match ZhihuClient::new(cookie.clone()) {
             Ok(c) => match c.recommend(None).await {
-                Ok((list, _next)) => { *client = Some(c); Update::Connected { cookie, list } }
+                Ok((list, next)) => { src.zhihu = Some(c); src.zhihu_cursor = next;
+                    Update::Connected { platform, cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             },
             Err(e) => Update::ConnectFailed(e.to_string()),
         },
-        Request::Recommend => match client {
-            Some(c) => match c.recommend(None).await {
-                Ok((v, _next)) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
-            None => Update::Error("未登录".into()),
-        },
-        Request::HotList => match client {
-            Some(c) => match c.hot_list().await {
-                Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
-            None => Update::Error("未登录".into()),
-        },
-        Request::Search(q) => match client {
-            Some(c) => match c.search(&q).await {
-                Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
-            None => Update::Error("未登录".into()),
-        },
-        Request::Answers(id) => match client {
-            Some(c) => match c.answers(&id).await {
-                Ok(v) => Update::Details(v), Err(e) => Update::Error(e.to_string()) },
-            None => Update::Error("未登录".into()),
-        },
-        Request::Comments(id) => match client {
-            Some(c) => match c.comments(&id).await {
-                Ok(v) => Update::Comments(v), Err(e) => Update::Error(e.to_string()) },
-            None => Update::Error("未登录".into()),
-        },
-        Request::FetchImages { answer_id, urls } => {
-            let paths = match client {
-                Some(c) => download_images(c, &urls).await,
-                None => Vec::new(),
-            };
-            Update::ImagesReady { answer_id, paths }
+        Platform::Nga => { src.nga_cookie = cookie.clone(); src.nga_page = 1;
+            let http = src.http();
+            match crate::platform::nga::list(&http, &src.nga_cookie, 1).await {
+                Ok(list) => Update::Connected { platform, cookie, list },
+                Err(e) => Update::ConnectFailed(e.to_string()),
+            }
         }
+        Platform::LinuxDo => { src.linuxdo_cookie = cookie.clone();
+            let http = src.http();
+            match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie).await {
+                Ok(list) => Update::Connected { platform, cookie, list },
+                Err(e) => Update::ConnectFailed(e.to_string()),
+            }
+        }
+        _ => Update::Error("该平台无需登录".into()),
     }
+}
+
+async fn load_list(src: &mut Sources, p: Platform) -> Update {
+    let http = src.http();
+    match p {
+        Platform::Zhihu => match &src.zhihu {
+            Some(c) => match c.recommend(src.zhihu_cursor.as_deref()).await {
+                Ok((list, next)) => { src.zhihu_cursor = next; Update::List(list) }
+                Err(e) => Update::Error(e.to_string()),
+            },
+            None => Update::Error("未登录知乎".into()),
+        },
+        Platform::V2ex => match crate::platform::v2ex::list(&http).await {
+            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+        Platform::Hupu => match crate::platform::hupu::list(&http).await {
+            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+        Platform::Nga => {
+            let page = if src.nga_page == 0 { 1 } else { src.nga_page };
+            let r = crate::platform::nga::list(&http, &src.nga_cookie, page).await;
+            match r { Ok(v) => { src.nga_page = page + 1; Update::List(v) } Err(e) => Update::Error(e.to_string()) }
+        }
+        Platform::LinuxDo => match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie).await {
+            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+    }
+}
+
+async fn load_detail(src: &mut Sources, p: Platform, token: &str) -> Update {
+    let http = src.http();
+    let r = match p {
+        Platform::Zhihu => match &src.zhihu {
+            Some(c) => c.answers(token).await,
+            None => Err(anyhow::anyhow!("未登录知乎")),
+        },
+        Platform::V2ex => crate::platform::v2ex::detail(&http, token).await,
+        Platform::Hupu => crate::platform::hupu::detail(&http, token).await,
+        Platform::Nga => crate::platform::nga::detail(&http, &src.nga_cookie, token).await,
+        Platform::LinuxDo => crate::platform::linuxdo::detail(&http, &src.linuxdo_cookie, token).await,
+    };
+    match r { Ok(v) => Update::Details(v), Err(e) => Update::Error(e.to_string()) }
 }
 
 /// Local cache dir for the *currently viewed* answer's images. Wiped on each new
@@ -112,7 +193,7 @@ fn url_ext(url: &str) -> String {
 
 /// Clear the cache dir, then download every URL into it. Returns local paths
 /// index-aligned with `urls`; a failed download yields an empty string in its slot.
-async fn download_images(client: &ZhihuClient, urls: &[String]) -> Vec<String> {
+async fn download_images(client: &crate::net::HttpClient, urls: &[String]) -> Vec<String> {
     let dir = image_cache_dir();
     let _ = std::fs::remove_dir_all(&dir);
     if std::fs::create_dir_all(&dir).is_err() {
@@ -121,7 +202,7 @@ async fn download_images(client: &ZhihuClient, urls: &[String]) -> Vec<String> {
     let mut paths = Vec::with_capacity(urls.len());
     for (i, url) in urls.iter().enumerate() {
         let file = dir.join(format!("{:02}.{}", i + 1, url_ext(url)));
-        let ok = match client.download_image(url).await {
+        let ok = match client.fetch_bytes(url).await {
             Ok(bytes) => std::fs::write(&file, &bytes).is_ok(),
             Err(_) => false,
         };
@@ -152,7 +233,7 @@ pub async fn run_app(cookie: String) -> Result<()> {
         app.replace(Screen::Login);
     } else {
         app.loading = true;
-        let _ = req_tx.send(Request::Connect(cookie));
+        let _ = req_tx.send(Request::Connect { platform: Platform::Zhihu, cookie });
     }
 
     let mut events = EventStream::new();
@@ -199,14 +280,14 @@ fn request_images(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
 fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Request>) {
     app.loading = false;
     match upd {
-        Update::Connected { cookie, list } => {
-            app.cookie = cookie.clone();
+        Update::Connected { platform, cookie, list } => {
             // Persist the validated cookie so next launch skips login.
             let mut cfg = crate::config::Config::load().unwrap_or_default();
-            cfg.zhihu.cookie = cookie;
+            cfg.set_cookie_for(platform, cookie.clone());
             let _ = cfg.save();
+            if platform == Platform::Zhihu { app.cookie = cookie; }
+            app.switch_platform(platform);
             app.error = None;
-            // Initial feed is the recommend stream — dedup against the session.
             app.apply_list_deduped(list);
             match app.screen() {
                 Screen::List => {}
@@ -292,9 +373,10 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
             if *app.screen() == Screen::Login {
                 let cookie = std::mem::take(&mut app.command);
                 if !cookie.is_empty() {
-                    app.cookie = cookie.clone();
+                    let p = app.pending_login_platform.take().unwrap_or(Platform::Zhihu);
+                    app.switch_platform(p);
                     app.loading = true;
-                    let _ = req_tx.send(Request::Connect(cookie));
+                    let _ = req_tx.send(Request::Connect { platform: p, cookie });
                 }
             } else if !app.command.is_empty() {
                 let cmd = command::parse(&std::mem::take(&mut app.command));
@@ -410,9 +492,9 @@ fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
             app.push(Screen::Detail);
             request_images(app, req_tx);
         }
-        (None, Some(qid)) => {
+        (None, Some(token)) => {
             app.loading = true;
-            let _ = req_tx.send(Request::Answers(qid));
+            let _ = req_tx.send(Request::Detail { platform: app.active_platform, token });
         }
         (None, None) => {}
     }
@@ -420,24 +502,44 @@ fn open_selection(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
 
 fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
     app.loading = true;
-    match &app.list_source.clone() {
-        ListSource::Recommend => { let _ = req_tx.send(Request::Recommend); }
-        ListSource::Hot => { let _ = req_tx.send(Request::HotList); }
-        ListSource::Search(q) => { let _ = req_tx.send(Request::Search(q.clone())); }
+    match app.active_platform {
+        Platform::Zhihu if app.list_source == ListSource::Hot => { let _ = req_tx.send(Request::HotList); }
+        Platform::Zhihu if matches!(app.list_source, ListSource::Search(_)) => {
+            if let ListSource::Search(q) = app.list_source.clone() { let _ = req_tx.send(Request::Search(q)); }
+        }
+        Platform::Zhihu => { let _ = req_tx.send(Request::More(Platform::Zhihu)); }
+        p => { let _ = req_tx.send(Request::List(p)); }
+    }
+}
+
+fn open_platform(app: &mut App, p: Platform, req_tx: &mpsc::UnboundedSender<Request>) {
+    app.switch_platform(p);
+    if p.needs_cookie() {
+        let cookie = {
+            let c = crate::config::Config::load().unwrap_or_default().cookie_for(p);
+            if c.is_empty() && p == Platform::Zhihu { app.cookie.clone() } else { c }
+        };
+        if cookie.is_empty() {
+            app.pending_login_platform = Some(p);
+            app.error = None;
+            app.replace(Screen::Login);
+            return;
+        }
+        app.loading = true;
+        let _ = req_tx.send(Request::Connect { platform: p, cookie });
+    } else {
+        app.loading = true;
+        let _ = req_tx.send(Request::List(p));
     }
 }
 
 fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<Request>) {
     match cmd {
-        Command::Zhihu => {
-            if app.cookie.is_empty() {
-                app.replace(Screen::Login);
-            } else {
-                app.list_source = ListSource::Recommend;
-                app.loading = true;
-                let _ = req_tx.send(Request::Recommend);
-            }
-        }
+        Command::Zhihu => open_platform(app, Platform::Zhihu, req_tx),
+        Command::V2ex => open_platform(app, Platform::V2ex, req_tx),
+        Command::Hupu => open_platform(app, Platform::Hupu, req_tx),
+        Command::Nga => open_platform(app, Platform::Nga, req_tx),
+        Command::LinuxDo => open_platform(app, Platform::LinuxDo, req_tx),
         Command::Hot => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);
@@ -471,7 +573,7 @@ mod tests {
     use crate::app::state::Screen;
     use crate::app::{ListSource};
     use crate::app::command::Command;
-    use crate::platform::{ListEntry, DetailView};
+    use crate::platform::{ListEntry, DetailView, Platform};
     use crossterm::event::KeyCode;
     use tokio::sync::mpsc;
 
@@ -486,6 +588,17 @@ mod tests {
 
     fn make_channel() -> (mpsc::UnboundedSender<Request>, mpsc::UnboundedReceiver<Request>) {
         mpsc::unbounded_channel::<Request>()
+    }
+
+    /// Point Config::load() at a guaranteed-nonexistent path so platform-switch
+    /// tests see an empty saved config regardless of the developer's machine.
+    /// Idempotent: every caller wants the same (missing) file, so parallel test
+    /// threads can't conflict.
+    fn use_empty_config() {
+        std::env::set_var(
+            "TOUCH_FISH_CONFIG",
+            std::env::temp_dir().join("touch-fish-test-nonexistent.toml"),
+        );
     }
 
     #[test]
@@ -531,18 +644,19 @@ mod tests {
         assert!(app.command.is_empty(), "typing must be swallowed while hidden");
     }
 
-    // 1. dispatch_zhihu_with_cookie_requests_recommend
+    // 1. dispatch_zhihu_with_cookie connects with that cookie
     #[test]
     fn dispatch_zhihu_with_cookie_requests_recommend() {
+        use_empty_config();
         let mut app = App::new();
         app.cookie = "x".into();
         let (tx, mut rx) = make_channel();
         dispatch_command(&mut app, Command::Zhihu, &tx);
         match rx.try_recv() {
-            Ok(Request::Recommend) => {}
-            other => panic!("expected Recommend, got {:?}", other),
+            Ok(Request::Connect { platform: Platform::Zhihu, cookie }) => assert_eq!(cookie, "x"),
+            other => panic!("expected Connect(Zhihu, x), got {:?}", other),
         }
-        assert_eq!(app.list_source, ListSource::Recommend);
+        assert_eq!(app.active_platform, Platform::Zhihu);
     }
 
     // 1b. dispatch_hot_with_cookie_requests_hotlist
@@ -562,12 +676,37 @@ mod tests {
     // 2. dispatch_zhihu_without_cookie_goes_to_login
     #[test]
     fn dispatch_zhihu_without_cookie_goes_to_login() {
+        use_empty_config();
         let mut app = App::new();
         // cookie is empty by default
         let (tx, mut rx) = make_channel();
         dispatch_command(&mut app, Command::Zhihu, &tx);
         assert_eq!(app.screen(), &Screen::Login);
+        assert_eq!(app.pending_login_platform, Some(Platform::Zhihu));
         assert!(rx.try_recv().is_err(), "nothing should have been sent");
+    }
+
+    #[test]
+    fn dispatch_v2ex_switches_platform_and_lists() {
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::V2ex, &tx);
+        assert_eq!(app.active_platform, Platform::V2ex);
+        match rx.try_recv() {
+            Ok(Request::List(Platform::V2ex)) => {}
+            other => panic!("expected List(V2ex), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn dispatch_nga_without_cookie_routes_to_login() {
+        use_empty_config();
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Nga, &tx);
+        assert_eq!(app.screen(), &Screen::Login);
+        assert_eq!(app.pending_login_platform, Some(Platform::Nga));
+        assert!(rx.try_recv().is_err(), "should not fetch before login");
     }
 
     // 3. dispatch_search_sends_search_request
@@ -603,6 +742,7 @@ mod tests {
     // 6. typing_a_command_then_enter_dispatches
     #[test]
     fn typing_a_command_then_enter_dispatches() {
+        use_empty_config();
         let mut app = App::new();
         app.cookie = "x".into();
         let (tx, mut rx) = make_channel();
@@ -611,8 +751,8 @@ mod tests {
         }
         handle_key(&mut app, KeyCode::Enter, &tx);
         match rx.try_recv() {
-            Ok(Request::Recommend) => {}
-            other => panic!("expected Recommend, got {:?}", other),
+            Ok(Request::Connect { platform: Platform::Zhihu, cookie }) => assert_eq!(cookie, "x"),
+            other => panic!("expected Connect(Zhihu, x), got {:?}", other),
         }
         assert!(app.command.is_empty(), "command buffer should be cleared after dispatch");
     }
@@ -644,8 +784,8 @@ mod tests {
         let (tx, mut rx) = make_channel();
         handle_key(&mut app, KeyCode::Char('r'), &tx);
         match rx.try_recv() {
-            Ok(Request::Recommend) => {}
-            other => panic!("expected Recommend refresh, got {:?}", other),
+            Ok(Request::More(Platform::Zhihu)) => {}
+            other => panic!("expected More(Zhihu) refresh, got {:?}", other),
         }
         assert!(app.loading);
     }
@@ -678,8 +818,11 @@ mod tests {
         let (tx, mut rx) = make_channel();
         open_selection(&mut app, &tx);
         match rx.try_recv() {
-            Ok(Request::Answers(id)) => assert_eq!(id, "123"),
-            other => panic!("expected Answers(123), got {:?}", other),
+            Ok(Request::Detail { platform, token }) => {
+                assert_eq!(platform, Platform::Zhihu);
+                assert_eq!(token, "123");
+            }
+            other => panic!("expected Detail(Zhihu, 123), got {:?}", other),
         }
         assert!(app.loading);
     }
