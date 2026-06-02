@@ -6,6 +6,10 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default)]
     pub zhihu: ZhihuConfig,
+    #[serde(default)]
+    pub nga: NgaConfig,
+    #[serde(default)]
+    pub linuxdo: LinuxDoConfig,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,8 +18,37 @@ pub struct ZhihuConfig {
     pub cookie: String,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NgaConfig { #[serde(default)] pub cookie: String }
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LinuxDoConfig { #[serde(default)] pub cookie: String }
+
 impl Config {
+    pub fn cookie_for(&self, p: crate::platform::Platform) -> String {
+        use crate::platform::Platform::*;
+        match p {
+            Zhihu => self.zhihu.cookie.clone(),
+            Nga => self.nga.cookie.clone(),
+            LinuxDo => self.linuxdo.cookie.clone(),
+            _ => String::new(),
+        }
+    }
+    pub fn set_cookie_for(&mut self, p: crate::platform::Platform, cookie: String) {
+        use crate::platform::Platform::*;
+        match p {
+            Zhihu => self.zhihu.cookie = cookie,
+            Nga => self.nga.cookie = cookie,
+            LinuxDo => self.linuxdo.cookie = cookie,
+            _ => {}
+        }
+    }
+
     pub fn config_path() -> PathBuf {
+        // Test/CI override so behavior never depends on a developer's real config.
+        if let Ok(p) = std::env::var("TOUCH_FISH_CONFIG") {
+            return PathBuf::from(p);
+        }
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("touch-fish")
@@ -60,6 +93,18 @@ mod tests {
         cfg.save_to(&path).unwrap();
         let loaded = Config::load_from(&path).unwrap();
         assert_eq!(cfg, loaded);
+    }
+
+    #[test]
+    fn config_roundtrips_all_cookies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut cfg = Config::default();
+        cfg.zhihu.cookie = "z".into();
+        cfg.nga.cookie = "n".into();
+        cfg.linuxdo.cookie = "l".into();
+        cfg.save_to(&path).unwrap();
+        assert_eq!(cfg, Config::load_from(&path).unwrap());
     }
 
     #[test]
