@@ -3,6 +3,21 @@ pub mod command;
 pub mod runner;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
+use std::collections::HashSet;
+
+/// Dedup key for a recommend row — answer id if known (each card is one answer),
+/// else question id, else the title.
+fn entry_key(e: &ListEntry) -> String {
+    if let Some(d) = &e.detail {
+        if !d.answer_id.is_empty() {
+            return format!("a:{}", d.answer_id);
+        }
+    }
+    if let Some(q) = &e.question_id {
+        return format!("q:{q}");
+    }
+    format!("t:{}", e.title)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ListSource {
@@ -35,6 +50,8 @@ pub struct App {
     pub image_paths: Vec<String>,
     /// answer_id that `image_paths` belong to — guards against stale async results.
     pub image_owner: String,
+    /// Recommend rows already shown this session, so refresh never repeats them.
+    seen: HashSet<String>,
 }
 
 impl App {
@@ -51,6 +68,21 @@ impl App {
             camouflage: true,
             image_paths: Vec::new(),
             image_owner: String::new(),
+            seen: HashSet::new(),
+        }
+    }
+
+    /// Apply a recommend batch: drop rows already seen this session, record the rest,
+    /// and show only the fresh ones. If the batch is entirely seen (server returned
+    /// the same page), keep the current list rather than blanking the screen.
+    pub fn apply_recommend(&mut self, items: Vec<ListEntry>) {
+        let fresh: Vec<ListEntry> = items
+            .into_iter()
+            .filter(|e| self.seen.insert(entry_key(e)))
+            .collect();
+        if !fresh.is_empty() {
+            self.list = fresh;
+            self.list_cursor = 0;
         }
     }
 
