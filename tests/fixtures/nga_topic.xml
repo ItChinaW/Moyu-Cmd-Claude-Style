@@ -1,6 +1,12 @@
 <root>
+  <__U>
+    <item><content>用户区不应被当作楼层</content></item>
+  </__U>
   <__R>
-    <item><content>主楼内容[b]加粗[/b]看图[img]./mon_202401/xx.jpg[/img]结束</content></item>
-    <item><content>一楼回复[quote]引用主楼[/quote]附议[s:ac:茶]</content></item>
+    <item><lou>0</lou><content>主楼内容[b]加粗[/b]看图[img]./mon_202401/xx.jpg[/img]结束</content></item>
+    <item><lou>1</lou><content>一楼回复[quote]引用主楼[/quote]附议[s:ac:茶]</content></item>
   </__R>
+  <__T>
+    <item><content></content></item>
+  </__T>
 </root>

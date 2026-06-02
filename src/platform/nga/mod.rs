@@ -122,6 +122,10 @@ fn parse_detail(xml: &str) -> Vec<DetailView> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut floors: Vec<String> = Vec::new();
+    // Posts live under <__R>; other sections (<__U> users, <__GLOBAL>, …) also have
+    // <item>/<content> we must ignore, so scope strictly to __R. Within __R the first
+    // item is the main post (lou 0); the rest are replies in document order.
+    let mut in_r = false;
     let mut in_item = false;
     let mut in_content = false;
     let mut content = String::new();
@@ -130,7 +134,9 @@ fn parse_detail(xml: &str) -> Vec<DetailView> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if name == "item" {
+                if name == "__R" {
+                    in_r = true;
+                } else if in_r && name == "item" {
                     in_item = true;
                     content.clear();
                 } else if in_item && name == "content" {
@@ -147,9 +153,13 @@ fn parse_detail(xml: &str) -> Vec<DetailView> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 if name == "content" {
                     in_content = false;
-                } else if name == "item" {
+                } else if name == "item" && in_item {
                     in_item = false;
-                    floors.push(content.clone());
+                    if !content.trim().is_empty() {
+                        floors.push(content.clone());
+                    }
+                } else if name == "__R" {
+                    in_r = false;
                 }
             }
             Ok(Event::Eof) => break,
@@ -247,6 +257,10 @@ mod tests {
         assert!(dvs[0].body.contains("── #1 ──"), "reply floor marker present");
         assert!(dvs[0].body.contains("【图1】"), "image marker present");
         assert_eq!(dvs[0].images.len(), 1);
+        // only __R floors count: __U content and the empty __T item are excluded.
+        assert_eq!(dvs[0].voteup, 2, "exactly 2 floors (main + 1 reply)");
+        assert!(!dvs[0].body.contains("用户区不应被当作楼层"), "non-__R content excluded");
+        assert!(!dvs[0].body.contains("── #2 ──"), "no empty extra floors");
     }
 
     #[tokio::test]
@@ -267,9 +281,19 @@ mod tests {
         if cfg.nga.cookie.is_empty() { eprintln!("skip live_nga_detail: no nga cookie"); return; }
         let c = HttpClient::new().unwrap();
         let rows = list(&c, &cfg.nga.cookie, 1).await.unwrap();
-        let token = rows.iter().find_map(|r| r.open_token.clone()).expect("a token");
-        let dvs = detail(&c, &cfg.nga.cookie, &token).await.unwrap();
-        assert!(!dvs.is_empty());
-        eprintln!("nga detail floors={} body_len={}", dvs[0].voteup, dvs[0].body.len());
+        // The first __T item can be a system placeholder (e.g. "帖子发布或回复时间超过限制")
+        // whose read.php returns 403; skip rows until one yields a real, non-empty body.
+        let mut found = false;
+        for r in rows.iter().filter_map(|r| r.open_token.clone()) {
+            if let Ok(dvs) = detail(&c, &cfg.nga.cookie, &r).await {
+                if !dvs.is_empty() && !dvs[0].body.trim().is_empty() {
+                    eprintln!("nga detail {} floors={} body_len={}", r, dvs[0].voteup, dvs[0].body.len());
+                    eprintln!("nga body head: {}", dvs[0].body.chars().take(80).collect::<String>());
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(found, "expected at least one openable NGA thread with a body");
     }
 }
