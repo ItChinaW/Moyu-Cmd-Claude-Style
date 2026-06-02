@@ -56,6 +56,10 @@ pub struct Paging {
 
 #[derive(Debug, Deserialize)]
 pub struct RecommendItem {
+    // Some feed items (ads, promos, other card types) carry no `target`; default to
+    // an empty target (kind="") so one such item doesn't abort the whole parse —
+    // the client filters empty-kind targets out.
+    #[serde(default)]
     pub target: RecommendTarget,
 }
 
@@ -144,11 +148,16 @@ pub struct AnswersResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct AnswerFeed {
+    // Question feeds can include non-answer items (ads/relevant-questions) with no
+    // `target`; default to an empty Answer (id="") so the whole feed still parses —
+    // the client skips empty-id answers.
+    #[serde(default)]
     pub target: Answer,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Answer {
+    #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub content: String,
@@ -227,6 +236,25 @@ mod tests {
         assert_eq!(t.content, "<p>正文</p>");
         assert_eq!(t.voteup_count, 12);
         assert_eq!(t.author.name, "老王");
+    }
+
+    #[test]
+    fn recommend_tolerates_item_without_target() {
+        // A feed item missing `target` (ad/promo slot) must not abort the whole parse.
+        let raw = r#"{"data":[{"ad_info":{}},{"target":{"type":"answer","id":"9","content":"x","question":{"id":"1","title":"t"}}}]}"#;
+        let r: RecommendResponse = serde_json::from_str(raw).expect("must parse despite target-less item");
+        assert_eq!(r.data.len(), 2);
+        assert_eq!(r.data[0].target.kind, "", "target-less item defaults to empty kind");
+        assert_eq!(r.data[1].target.kind, "answer");
+    }
+
+    #[test]
+    fn answers_feed_tolerates_item_without_target() {
+        let raw = r#"{"data":[{"promotion":{}},{"target":{"id":"42","content":"<p>正文</p>"}}]}"#;
+        let r: AnswersResponse = serde_json::from_str(raw).expect("must parse despite target-less item");
+        assert_eq!(r.data.len(), 2);
+        assert_eq!(r.data[0].target.id, "", "target-less feed item defaults to empty id");
+        assert_eq!(r.data[1].target.id, "42");
     }
 
     #[test]

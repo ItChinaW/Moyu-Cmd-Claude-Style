@@ -59,18 +59,21 @@ impl ZhihuClient {
         );
         let body = self.get(&path).await?;
         let resp: model::AnswersResponse = serde_json::from_str(&body)?;
-        Ok(resp.data.into_iter().map(|f| {
-            // Body keeps the inline 【图N】 markers; the clickable image list is
-            // rendered by the UI from locally-downloaded paths, not baked in here.
-            let (body, images) = html::to_text_and_images(&f.target.content);
-            DetailView {
-                author: f.target.author.name,
-                voteup: f.target.voteup_count,
-                body,
-                images,
-                answer_id: f.target.id,
-            }
-        }).collect())
+        Ok(resp.data.into_iter()
+            // Skip non-answer feed items (ads/related questions) that have no real id.
+            .filter(|f| !f.target.id.is_empty())
+            .map(|f| {
+                // Body keeps the inline 【图N】 markers; the clickable image list is
+                // rendered by the UI from locally-downloaded paths, not baked in here.
+                let (body, images) = html::to_text_and_images(&f.target.content);
+                DetailView {
+                    author: f.target.author.name,
+                    voteup: f.target.voteup_count,
+                    body,
+                    images,
+                    answer_id: f.target.id,
+                }
+            }).collect())
     }
 
     pub async fn recommend(&self, cursor: Option<&str>) -> Result<(Vec<ListEntry>, Option<String>)> {
