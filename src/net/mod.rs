@@ -70,6 +70,36 @@ impl HttpClient {
         }
         Ok(bytes.to_vec())
     }
+
+    /// GET an arbitrary URL with optional extra headers, return body text.
+    pub async fn get_text(&self, url: &str, headers: &[(&str, &str)]) -> Result<String> {
+        let mut req = self.inner.get(url).header("user-agent", USER_AGENT);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let resp = req.send().await.context("send get_text")?;
+        let status = resp.status();
+        let body = resp.text().await.context("read get_text body")?;
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status}: {}", body.chars().take(200).collect::<String>());
+        }
+        Ok(body)
+    }
+
+    /// GET an arbitrary URL with optional extra headers, return raw bytes (for GBK pages).
+    pub async fn get_bytes(&self, url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+        let mut req = self.inner.get(url).header("user-agent", USER_AGENT);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let resp = req.send().await.context("send get_bytes")?;
+        let status = resp.status();
+        let bytes = resp.bytes().await.context("read get_bytes")?;
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status} fetching bytes");
+        }
+        Ok(bytes.to_vec())
+    }
 }
 
 #[cfg(test)]
@@ -82,5 +112,13 @@ mod tests {
         assert_eq!(h.get("x-zse-96").unwrap(), "2.0_demo");
         assert_eq!(h.get("x-zse-93").unwrap(), "101_3_3.0");
         assert_eq!(h.get("cookie").unwrap(), "d_c0=abc");
+    }
+
+    #[tokio::test]
+    #[ignore = "live network; run with --ignored"]
+    async fn get_text_fetches_v2ex() {
+        let c = HttpClient::new().unwrap();
+        let html = c.get_text("https://www.v2ex.com/?tab=all", &[]).await.unwrap();
+        assert!(html.contains("<"), "should return HTML");
     }
 }
