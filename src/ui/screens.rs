@@ -335,8 +335,14 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(format!("> {e}"), Style::default().fg(Color::Red)))
     } else if app.loading {
         Line::from(Span::styled("> …".to_string(), Style::default().fg(Color::DarkGray)))
-    } else {
+    } else if app.camouflage {
         Line::from(format!("> {}", app.command))
+    } else {
+        // Non-camouflaged: surface the active platform as a status prefix.
+        Line::from(vec![
+            Span::styled(format!("{} · ", app.active_platform.label()), Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("> {}", app.command)),
+        ])
     };
     f.render_widget(Paragraph::new(line), area);
 }
