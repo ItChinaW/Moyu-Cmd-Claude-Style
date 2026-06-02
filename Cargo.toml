@@ -23,6 +23,8 @@ ego-tree = "=0.6.3"
 anyhow = "1"
 thiserror = "1"
 futures = "0.3"
+quick-xml = "0.36"
+encoding_rs = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
