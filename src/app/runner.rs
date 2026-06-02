@@ -228,13 +228,9 @@ pub async fn run_app(cookie: String) -> Result<()> {
     spawn_worker(req_rx, upd_tx);
 
     let mut app = App::new();
-    app.cookie = cookie.clone();
-    if cookie.is_empty() {
-        app.replace(Screen::Login);
-    } else {
-        app.loading = true;
-        let _ = req_tx.send(Request::Connect { platform: Platform::Zhihu, cookie });
-    }
+    // Keep any saved Zhihu cookie for when the user picks Zhihu, but never
+    // auto-enter a platform: always land on the Root platform picker.
+    app.cookie = cookie;
 
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(120));
@@ -381,17 +377,22 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
             } else if !app.command.is_empty() {
                 let cmd = command::parse(&std::mem::take(&mut app.command));
                 dispatch_command(app, cmd, req_tx);
+            } else if *app.screen() == Screen::Root {
+                // Enter on the platform picker opens the highlighted platform.
+                open_platform(app, app.picked_platform(), req_tx);
             } else {
                 open_selection(app, req_tx);
             }
         }
         KeyCode::Up => match app.screen() {
+            Screen::Root => app.root_cursor_up(),
             Screen::List => app.cursor_up(),
             Screen::Detail => app.detail_scroll = app.detail_scroll.saturating_sub(1),
             Screen::Comments => app.comment_scroll = app.comment_scroll.saturating_sub(1),
             _ => {}
         },
         KeyCode::Down => match app.screen() {
+            Screen::Root => app.root_cursor_down(),
             Screen::List => app.cursor_down(),
             Screen::Detail => app.detail_scroll = app.detail_scroll.saturating_add(1),
             Screen::Comments => app.comment_scroll = app.comment_scroll.saturating_add(1),

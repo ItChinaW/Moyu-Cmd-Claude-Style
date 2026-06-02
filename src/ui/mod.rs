@@ -36,9 +36,13 @@ mod tests {
     }
 
     #[test]
-    fn root_screen_mentions_zhihu_command() {
+    fn root_screen_lists_all_platforms() {
         let app = App::new();
-        assert!(render(&app).contains("/zhihu"));
+        let screen = render(&app);
+        // The landing page is a platform picker listing every platform.
+        for p in crate::platform::Platform::ALL {
+            assert!(screen.contains(p.label()), "root should list {}", p.label());
+        }
     }
 
     #[test]

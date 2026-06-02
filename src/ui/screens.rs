@@ -18,7 +18,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(f.area());
     match app.screen() {
-        Screen::Root => draw_root(f, chunks[0]),
+        Screen::Root => draw_root(f, chunks[0], app),
         Screen::Login => draw_login(f, chunks[0], app),
         Screen::List => draw_list(f, chunks[0], app),
         Screen::Detail => draw_detail(f, chunks[0], app),
@@ -28,12 +28,24 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_command_bar(f, chunks[1], app);
 }
 
-fn draw_root(f: &mut Frame, area: Rect) {
-    f.render_widget(
-        Paragraph::new("输入 /zhihu 进入知乎，或 /v2ex /hupu /nga /linuxdo 切换平台（/help 查看全部命令）")
-            .wrap(Wrap { trim: true }),
-        area,
-    );
+fn draw_root(f: &mut Frame, area: Rect, app: &App) {
+    let mut lines = vec![
+        Line::from(Span::styled("选择平台（↑↓ 选择，回车进入）", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+    ];
+    for (i, p) in crate::platform::Platform::ALL.iter().enumerate() {
+        let selected = i == app.root_cursor;
+        let marker = if selected { "> " } else { "  " };
+        let mut label = format!("{marker}{}", p.label());
+        if p.needs_cookie() { label.push_str("  (需 cookie)"); }
+        let style = if selected {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(label, style)));
+    }
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {

@@ -9,6 +9,10 @@ pub mod linuxdo;
 pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo }
 
 impl Platform {
+    /// All platforms, in landing-page picker order.
+    pub const ALL: [Platform; 5] =
+        [Platform::Zhihu, Platform::V2ex, Platform::Hupu, Platform::Nga, Platform::LinuxDo];
+
     /// Human label shown in the (non-camouflaged) status line.
     pub fn label(self) -> &'static str {
         match self {

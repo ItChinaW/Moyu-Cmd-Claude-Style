@@ -56,6 +56,8 @@ pub struct App {
     /// When a cookie-gated platform was requested without a stored cookie, the
     /// platform the pending Login screen should connect once a cookie is entered.
     pub pending_login_platform: Option<crate::platform::Platform>,
+    /// Cursor on the Root platform picker (index into `Platform::ALL`).
+    pub root_cursor: usize,
 }
 
 impl App {
@@ -75,7 +77,17 @@ impl App {
             seen: HashSet::new(),
             active_platform: crate::platform::Platform::Zhihu,
             pending_login_platform: None,
+            root_cursor: 0,
         }
+    }
+
+    /// Platform highlighted on the Root picker.
+    pub fn picked_platform(&self) -> crate::platform::Platform {
+        crate::platform::Platform::ALL[self.root_cursor]
+    }
+    pub fn root_cursor_up(&mut self) { self.root_cursor = self.root_cursor.saturating_sub(1); }
+    pub fn root_cursor_down(&mut self) {
+        if self.root_cursor + 1 < crate::platform::Platform::ALL.len() { self.root_cursor += 1; }
     }
 
     /// Apply a list batch: drop rows already seen this session, record the rest,
