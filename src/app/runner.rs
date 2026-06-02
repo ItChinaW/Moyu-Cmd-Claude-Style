@@ -117,7 +117,7 @@ async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Updat
         Platform::Nga => { src.nga_cookie = cookie.clone(); src.nga_page = 1;
             let http = src.http();
             match crate::platform::nga::list(&http, &src.nga_cookie, 1).await {
-                Ok(list) => Update::Connected { platform, cookie, list },
+                Ok(list) => { src.nga_page = 2; Update::Connected { platform, cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             }
         }
@@ -345,7 +345,7 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
             } else if c == 'q' {
                 app.should_quit = true;
             } else if c == 'r' && *app.screen() == Screen::List {
-                if !app.cookie.is_empty() {
+                if !app.cookie.is_empty() || !app.active_platform.needs_cookie() {
                     refresh(app, req_tx);
                 }
             } else if c == 'c'
@@ -550,7 +550,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
             }
         }
         Command::Refresh => {
-            if !app.cookie.is_empty() {
+            if !app.cookie.is_empty() || !app.active_platform.needs_cookie() {
                 refresh(app, req_tx);
             }
         }
