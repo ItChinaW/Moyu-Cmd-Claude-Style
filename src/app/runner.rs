@@ -207,7 +207,7 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
             let _ = cfg.save();
             app.error = None;
             // Initial feed is the recommend stream — dedup against the session.
-            app.apply_recommend(list);
+            app.apply_list_deduped(list);
             match app.screen() {
                 Screen::List => {}
                 Screen::Login => app.replace(Screen::List),
@@ -216,11 +216,7 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
         }
         Update::List(list) => {
             app.error = None;
-            if app.list_source == ListSource::Recommend {
-                app.apply_recommend(list);
-            } else {
-                app.set_list(list);
-            }
+            app.apply_list_deduped(list);
             match app.screen() {
                 Screen::List => {}
                 Screen::Login => app.replace(Screen::List),
@@ -783,14 +779,14 @@ mod tests {
     #[test]
     fn recommend_dedup_skips_seen_rows() {
         let mut app = App::new();
-        app.apply_recommend(vec![entry("a", Some("1")), entry("b", Some("2"))]);
+        app.apply_list_deduped(vec![entry("a", Some("1")), entry("b", Some("2"))]);
         assert_eq!(app.list.len(), 2);
         // Refresh: q:2 already seen → dropped; q:3 is new → shown (replaces list).
-        app.apply_recommend(vec![entry("b-again", Some("2")), entry("c", Some("3"))]);
+        app.apply_list_deduped(vec![entry("b-again", Some("2")), entry("c", Some("3"))]);
         assert_eq!(app.list.len(), 1);
         assert_eq!(app.list[0].title, "c");
         // Refresh returning only seen rows → keep current list, don't blank it.
-        app.apply_recommend(vec![entry("a", Some("1"))]);
+        app.apply_list_deduped(vec![entry("a", Some("1"))]);
         assert_eq!(app.list.len(), 1);
         assert_eq!(app.list[0].title, "c");
     }

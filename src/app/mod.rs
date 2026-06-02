@@ -78,10 +78,10 @@ impl App {
         }
     }
 
-    /// Apply a recommend batch: drop rows already seen this session, record the rest,
+    /// Apply a list batch: drop rows already seen this session, record the rest,
     /// and show only the fresh ones. If the batch is entirely seen (server returned
     /// the same page), keep the current list rather than blanking the screen.
-    pub fn apply_recommend(&mut self, items: Vec<ListEntry>) {
+    pub fn apply_list_deduped(&mut self, items: Vec<ListEntry>) {
         let fresh: Vec<ListEntry> = items
             .into_iter()
             .filter(|e| self.seen.insert(entry_key(e)))
@@ -96,6 +96,17 @@ impl App {
     pub fn push(&mut self, s: Screen) { self.stack.push(s); }
     pub fn back(&mut self) { if self.stack.len() > 1 { self.stack.pop(); } }
     pub fn replace(&mut self, s: Screen) { self.stack.pop(); self.stack.push(s); }
+
+    /// Switch the active platform: reset dedup memory and current list so the new
+    /// platform starts clean.
+    pub fn switch_platform(&mut self, p: crate::platform::Platform) {
+        if self.active_platform != p {
+            self.active_platform = p;
+            self.seen.clear();
+            self.list.clear();
+            self.list_cursor = 0;
+        }
+    }
 
     pub fn set_list(&mut self, items: Vec<ListEntry>) { self.list = items; self.list_cursor = 0; }
     pub fn list_cursor(&self) -> usize { self.list_cursor }
