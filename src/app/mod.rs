@@ -108,6 +108,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub fn set_list(&mut self, items: Vec<ListEntry>) { self.list = items; self.list_cursor = 0; }
     pub fn list_cursor(&self) -> usize { self.list_cursor }
     pub fn cursor_down(&mut self) {

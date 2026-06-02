@@ -22,11 +22,6 @@ impl ZhihuClient {
         self.http.signed_get(path, &self.cookie, &sig).await
     }
 
-    /// Download an image URL, returning the raw bytes.
-    pub async fn download_image(&self, url: &str) -> Result<Vec<u8>> {
-        self.http.fetch_bytes(url).await
-    }
-
     pub async fn hot_list(&self) -> Result<Vec<ListEntry>> {
         let body = self.get("/api/v3/feed/topstory/hot-lists/total?limit=50&desktop=true").await?;
         let resp: model::HotListResponse = serde_json::from_str(&body)?;
