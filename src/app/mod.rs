@@ -104,6 +104,18 @@ impl App {
         }
     }
 
+    /// "Load more": append rows not yet seen this session onto the current list,
+    /// leaving the cursor where it is. Used by forum boards (NGA, …) whose hot/
+    /// active feeds re-sort each request — replacing the list would shrink it to
+    /// the few newly-bumped threads, so we grow it instead.
+    pub fn extend_list_deduped(&mut self, items: Vec<ListEntry>) {
+        for e in items {
+            if self.seen.insert(entry_key(&e)) {
+                self.list.push(e);
+            }
+        }
+    }
+
     pub fn screen(&self) -> &Screen { self.stack.last().unwrap() }
     pub fn push(&mut self, s: Screen) { self.stack.push(s); }
     pub fn back(&mut self) { if self.stack.len() > 1 { self.stack.pop(); } }
@@ -139,5 +151,22 @@ mod tests {
     fn default_platform_is_zhihu() {
         let app = App::new();
         assert_eq!(app.active_platform, crate::platform::Platform::Zhihu);
+    }
+
+    fn e(title: &str, tok: &str) -> ListEntry {
+        ListEntry { title: title.into(), subtitle: String::new(), open_token: Some(tok.into()), detail: None }
+    }
+
+    #[test]
+    fn extend_list_deduped_appends_only_fresh() {
+        let mut app = App::new();
+        app.apply_list_deduped(vec![e("a", "1"), e("b", "2")]);
+        app.list_cursor = 1;
+        // Load-more with one seen ("2") + two new ("3","4"): list grows, cursor kept.
+        app.extend_list_deduped(vec![e("b2", "2"), e("c", "3"), e("d", "4")]);
+        assert_eq!(app.list.len(), 4, "two fresh appended, seen dropped");
+        assert_eq!(app.list[2].title, "c");
+        assert_eq!(app.list[3].title, "d");
+        assert_eq!(app.list_cursor, 1, "cursor must not move on append");
     }
 }

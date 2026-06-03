@@ -1,7 +1,7 @@
 {
   "name": "moyu-fish",
-  "version": "0.2.1",
-  "description": "在终端里摸鱼的知乎客户端,带 Claude Code 风格伪装与老板键",
+  "version": "0.2.2",
+  "description": "在终端里摸鱼的多平台客户端(知乎/V2EX/虎扑/NGA/Linux.do),带 Claude Code 风格伪装与老板键",
   "bin": {
     "moyu": "bin/moyu.js"
   },
@@ -15,6 +15,10 @@
   "keywords": [
     "moyu",
     "zhihu",
+    "v2ex",
+    "hupu",
+    "nga",
+    "linuxdo",
     "tui",
     "terminal",
     "cli"

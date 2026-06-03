@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/moyu-fish.svg)](https://www.npmjs.com/package/moyu-fish)
 
-在终端(cmd / PowerShell / macOS / Linux)里摸鱼。v1 支持知乎:热榜、搜索、回答详情、评论,全程方向键浏览,界面就画在当前终端窗口里。
+在终端(cmd / PowerShell / macOS / Linux)里摸鱼。支持知乎、V2EX、虎扑、NGA、Linux.do,统一「列表 → 详情」交互,全程方向键浏览,界面就画在当前终端窗口里。
 
 ## 安装
 
@@ -23,10 +23,10 @@ moyu
    ```bash
    cargo run --release
    ```
-2. 在底部命令行输入 `/zhihu` 回车进入知乎。
-   首次使用会进入登录流程,需要粘贴你的知乎 Cookie:
-   登录 zhihu.com → 按 **F12** → **Network** 标签 → 刷新 → 点任意一个 `www.zhihu.com` 请求 → 在 **Request Headers** 里复制 `cookie:` 整行的值 → 粘贴到命令行回车。
-   程序会发一个测试请求验证 Cookie,通过后保存到本地配置,之后启动直接进热榜。
+2. 启动后是平台选择列表,`↑↓` 选平台、回车进入。想免登录先体验,选 **V2EX** 或 **虎扑**(无需 cookie)。
+   知乎 / NGA / Linux.do 需要 cookie,首次进入会进入登录流程,粘贴对应站点的 Cookie:
+   登录该站点 → 按 **F12** → **Network** 标签 → 刷新 → 点任意一个本站请求 → 在 **Request Headers** 里复制 `cookie:` 整行的值 → 粘贴到命令行回车。
+   程序会发一个测试请求验证 Cookie,通过后保存到本地配置(各平台独立),之后启动直接可用。
 
 ## 操作
 

@@ -34,6 +34,9 @@ pub enum Update {
     Connected { platform: Platform, cookie: String, list: Vec<ListEntry> },
     ConnectFailed(String),
     List(Vec<ListEntry>),
+    /// "Load more" batch: appended to the current list (cursor kept) instead of
+    /// replacing it. Used for paginated forum boards.
+    MoreList(Vec<ListEntry>),
     Details(Vec<DetailView>),
     Comments(Vec<CommentView>),
     ImagesReady { answer_id: String, paths: Vec<String> },
@@ -78,7 +81,12 @@ async fn handle(src: &mut Sources, req: Request) -> Update {
     match req {
         Request::Connect { platform, cookie } => connect(src, platform, cookie).await,
         Request::List(p) => { reset_cursor(src, p); load_list(src, p).await }
-        Request::More(p) => load_list(src, p).await,
+        // "Load more": forums append their next page; Zhihu keeps its replace-per-
+        // screen recommend semantics (each refresh = a fresh screenful).
+        Request::More(p) => match load_list(src, p).await {
+            Update::List(items) if p != Platform::Zhihu => Update::MoreList(items),
+            other => other,
+        },
         Request::HotList => match &src.zhihu {
             Some(c) => match c.hot_list().await { Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
             None => Update::Error("未登录知乎".into()),
@@ -300,6 +308,15 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
                 _ => app.push(Screen::List),
             }
         }
+        Update::MoreList(list) => {
+            app.error = None;
+            app.extend_list_deduped(list);
+            match app.screen() {
+                Screen::List => {}
+                Screen::Login => app.replace(Screen::List),
+                _ => app.push(Screen::List),
+            }
+        }
         Update::Details(d) => {
             app.error = None; app.details = d; app.detail_idx = 0; app.detail_scroll = 0;
             app.push(Screen::Detail);
@@ -369,7 +386,9 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
             if *app.screen() == Screen::Login {
                 let cookie = std::mem::take(&mut app.command);
                 if !cookie.is_empty() {
-                    let p = app.pending_login_platform.take().unwrap_or(Platform::Zhihu);
+                    // /login (no pending platform) re-logs into the current platform,
+                // not always Zhihu.
+                let p = app.pending_login_platform.take().unwrap_or(app.active_platform);
                     app.switch_platform(p);
                     app.loading = true;
                     let _ = req_tx.send(Request::Connect { platform: p, cookie });
@@ -509,7 +528,8 @@ fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
             if let ListSource::Search(q) = app.list_source.clone() { let _ = req_tx.send(Request::Search(q)); }
         }
         Platform::Zhihu => { let _ = req_tx.send(Request::More(Platform::Zhihu)); }
-        p => { let _ = req_tx.send(Request::List(p)); }
+        // Forums "load more": advance the page and append fresh threads.
+        p => { let _ = req_tx.send(Request::More(p)); }
     }
 }
 
@@ -933,6 +953,35 @@ mod tests {
         app.apply_list_deduped(vec![entry("a", Some("1"))]);
         assert_eq!(app.list.len(), 1);
         assert_eq!(app.list[0].title, "c");
+    }
+
+    // 16b. forum refresh loads more (advances + appends), not a list-replace
+    #[test]
+    fn forum_refresh_sends_more_not_list() {
+        let mut app = App::new();
+        app.switch_platform(Platform::Nga);
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        refresh(&mut app, &tx);
+        match rx.try_recv() {
+            Ok(Request::More(Platform::Nga)) => {}
+            other => panic!("expected More(Nga) on forum refresh, got {:?}", other),
+        }
+    }
+
+    // 16c. MoreList appends fresh rows (cursor kept), unlike List which replaces
+    #[test]
+    fn morelist_appends_and_keeps_position() {
+        let mut app = App::new();
+        let (tx, _rx) = make_channel();
+        app.push(Screen::List);
+        apply_update(&mut app, Update::List(vec![entry("a", Some("1")), entry("b", Some("2"))]), &tx);
+        assert_eq!(app.list.len(), 2);
+        // A "load more" batch: one already-seen row + one new → list grows to 3.
+        apply_update(&mut app, Update::MoreList(vec![entry("b", Some("2")), entry("c", Some("3"))]), &tx);
+        assert_eq!(app.list.len(), 3, "fresh row appended, seen row dropped");
+        assert_eq!(app.list[2].title, "c");
+        assert_eq!(app.screen(), &Screen::List);
     }
 
     // 12. apply_error_update_sets_error_without_navigating

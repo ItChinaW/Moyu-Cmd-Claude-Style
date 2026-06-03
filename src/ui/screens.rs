@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -49,12 +49,15 @@ fn draw_root(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
+    // The login screen serves every cookie-gated platform (知乎/NGA/Linux.do), so
+    // name the one being logged into rather than hardcoding 知乎.
+    let plat = app.pending_login_platform.unwrap_or(app.active_platform).label();
     let msg = if let Some(e) = &app.error {
-        format!("登录失败: {e}\n请重新粘贴知乎 Cookie 后回车")
+        format!("登录失败: {e}\n请重新粘贴 {plat} Cookie 后回车")
     } else if app.loading {
         "验证中…".to_string()
     } else {
-        "未检测到登录态。浏览器 F12 → Network → 任意知乎请求复制 Cookie，粘贴后回车。".to_string()
+        format!("未检测到 {plat} 登录态。浏览器 F12 → Network → 任意 {plat} 请求复制 Cookie，粘贴后回车。")
     };
     f.render_widget(Paragraph::new(msg).wrap(Wrap { trim: true }), area);
 }
@@ -81,7 +84,10 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
         }
         ListItem::new(lines)
     }).collect();
-    f.render_widget(List::new(items), area);
+    // ListState keeps the selected row scrolled into view as the cursor moves.
+    let mut state = ListState::default();
+    if !app.list.is_empty() { state.select(Some(app.list_cursor())); }
+    f.render_stateful_widget(List::new(items), area, &mut state);
 }
 
 /// Truncate to a single display line of at most `cols` terminal columns, cutting
@@ -117,6 +123,11 @@ fn draw_list_todos(f: &mut Frame, area: Rect, app: &App) {
     let cursor = app.list_cursor();
     // Width budget for the one-line subtitle (8-space indent + small margin).
     let sub_cols = (area.width as usize).saturating_sub(10).max(20);
+    // Title budget leaves room for the connector (5) + checkbox (2) so a long
+    // title never wraps — keeps the line count exact for cursor-follow scrolling.
+    let title_cols = (area.width as usize).saturating_sub(8).max(10);
+    // Line index (within `lines`) of the cursor's todo row, for scroll-to-cursor.
+    let mut cursor_line = 0usize;
     let header = || {
         Line::from(vec![
             Span::styled("● ", Style::default().fg(Color::Green)),
@@ -142,10 +153,11 @@ fn draw_list_todos(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 ("☐ ", Style::default().fg(Color::Gray))
             };
+            if i == cursor { cursor_line = lines.len(); }
             lines.push(Line::from(vec![
                 Span::raw(connector),
                 Span::styled(mark, style),
-                Span::styled(one_line(&e.title, sub_cols + 4), style),
+                Span::styled(one_line(&e.title, title_cols), style),
             ]));
             if !e.subtitle.is_empty() {
                 lines.push(Line::from(Span::styled(
@@ -155,7 +167,15 @@ fn draw_list_todos(f: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    // Scroll so the cursor row stays on screen (with ~3 rows of trailing context)
+    // as the selection moves past the bottom; the list itself can be far taller
+    // than the viewport once "load more" has accumulated pages.
+    let view_h = area.height as usize;
+    let scroll = cursor_line.saturating_sub(view_h.saturating_sub(3)) as u16;
+    f.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll, 0)),
+        area,
+    );
 }
 
 /// One authentic-looking Claude Code transcript block (rotated by index), styled to
