@@ -87,14 +87,16 @@ fn header_pairs(cookie: &str) -> Vec<(&'static str, String)> {
          ("accept", "application/xml,text/html;q=0.9,*/*;q=0.8".to_string())]
 }
 
-pub async fn list(http: &HttpClient, cookie: &str) -> Result<Vec<ListEntry>> {
+/// Discourse's `latest.rss` honours `?page=N` (0-indexed), so "load more" just
+/// advances the page — each page is 30 fresh topics.
+pub async fn list(http: &HttpClient, cookie: &str, page: u32) -> Result<Vec<ListEntry>> {
     if cookie.is_empty() {
         return Ok(vec![ListEntry { title: "Linux.do 未配置 cookie(回车去配置)".into(),
             subtitle: String::new(), open_token: None, detail: None }]);
     }
     let h = header_pairs(cookie);
     let hr: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let rss = http.get_text("https://linux.do/latest.rss", &hr).await?;
+    let rss = http.get_text(&format!("https://linux.do/latest.rss?page={page}"), &hr).await?;
     Ok(parse_list(&rss))
 }
 
@@ -143,7 +145,7 @@ mod tests {
         let cfg = crate::config::Config::load().unwrap();
         if cfg.linuxdo.cookie.is_empty() { eprintln!("skip live_linuxdo_list: no linuxdo cookie"); return; }
         let c = HttpClient::new().unwrap();
-        let rows = list(&c, &cfg.linuxdo.cookie).await.unwrap();
+        let rows = list(&c, &cfg.linuxdo.cookie, 0).await.unwrap();
         assert!(!rows.is_empty());
         eprintln!("linuxdo[0] = {} ({:?})", rows[0].title, rows[0].open_token);
     }
@@ -154,7 +156,7 @@ mod tests {
         let cfg = crate::config::Config::load().unwrap();
         if cfg.linuxdo.cookie.is_empty() { eprintln!("skip live_linuxdo_detail: no linuxdo cookie"); return; }
         let c = HttpClient::new().unwrap();
-        let rows = list(&c, &cfg.linuxdo.cookie).await.unwrap();
+        let rows = list(&c, &cfg.linuxdo.cookie, 0).await.unwrap();
         let token = rows.iter().find_map(|r| r.open_token.as_deref()).unwrap_or("https://linux.do/t/topic/1");
         let dvs = detail(&c, &cfg.linuxdo.cookie, token).await.unwrap();
         assert!(!dvs.is_empty());

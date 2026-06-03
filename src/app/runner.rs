@@ -47,9 +47,12 @@ pub enum Update {
 struct Sources {
     zhihu: Option<ZhihuClient>,
     zhihu_cursor: Option<String>,
+    v2ex_tab: usize,
+    hupu_board: usize,
     nga_cookie: String,
     nga_page: u32,
     linuxdo_cookie: String,
+    linuxdo_page: u32,
     http: Option<crate::net::HttpClient>,
 }
 
@@ -109,7 +112,13 @@ async fn handle(src: &mut Sources, req: Request) -> Update {
 }
 
 fn reset_cursor(src: &mut Sources, p: Platform) {
-    match p { Platform::Zhihu => src.zhihu_cursor = None, Platform::Nga => src.nga_page = 1, _ => {} }
+    match p {
+        Platform::Zhihu => src.zhihu_cursor = None,
+        Platform::V2ex => src.v2ex_tab = 0,
+        Platform::Hupu => src.hupu_board = 0,
+        Platform::Nga => src.nga_page = 1,
+        Platform::LinuxDo => src.linuxdo_page = 0,
+    }
 }
 
 async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Update {
@@ -129,10 +138,11 @@ async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Updat
                 Err(e) => Update::ConnectFailed(e.to_string()),
             }
         }
-        Platform::LinuxDo => { src.linuxdo_cookie = cookie.clone();
+        Platform::LinuxDo => { src.linuxdo_cookie = cookie.clone(); src.linuxdo_page = 0;
             let http = src.http();
-            match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie).await {
-                Ok(list) => Update::Connected { platform, cookie, list },
+            match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie, 0).await {
+                // Next "load more" starts at page 1.
+                Ok(list) => { src.linuxdo_page = 1; Update::Connected { platform, cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             }
         }
@@ -150,17 +160,32 @@ async fn load_list(src: &mut Sources, p: Platform) -> Update {
             },
             None => Update::Error("未登录知乎".into()),
         },
-        Platform::V2ex => match crate::platform::v2ex::list(&http).await {
-            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
-        Platform::Hupu => match crate::platform::hupu::list(&http).await {
-            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+        Platform::V2ex => {
+            let tab = src.v2ex_tab;
+            match crate::platform::v2ex::list(&http, tab).await {
+                Ok(v) => { src.v2ex_tab = tab + 1; Update::List(v) }
+                Err(e) => Update::Error(e.to_string()),
+            }
+        }
+        Platform::Hupu => {
+            let board = src.hupu_board;
+            match crate::platform::hupu::list(&http, board).await {
+                Ok(v) => { src.hupu_board = board + 1; Update::List(v) }
+                Err(e) => Update::Error(e.to_string()),
+            }
+        }
         Platform::Nga => {
             let page = if src.nga_page == 0 { 1 } else { src.nga_page };
             let r = crate::platform::nga::list(&http, &src.nga_cookie, page).await;
             match r { Ok(v) => { src.nga_page = page + 1; Update::List(v) } Err(e) => Update::Error(e.to_string()) }
         }
-        Platform::LinuxDo => match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie).await {
-            Ok(v) => Update::List(v), Err(e) => Update::Error(e.to_string()) },
+        Platform::LinuxDo => {
+            let page = src.linuxdo_page;
+            match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie, page).await {
+                Ok(v) => { src.linuxdo_page = page + 1; Update::List(v) }
+                Err(e) => Update::Error(e.to_string()),
+            }
+        }
     }
 }
 

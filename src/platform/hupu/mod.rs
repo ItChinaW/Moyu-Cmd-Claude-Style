@@ -6,6 +6,14 @@ use crate::platform::{ListEntry, DetailView, html};
 const BASE: &str = "https://bbs.hupu.com";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36";
 
+// Hupu's list pages have no real paging (`?page=2` returns page 1 again), so
+// "load more" rotates through the `all-*` aggregation boards (each a different
+// category, all no-cookie). Index 0 is the default; `r` advances it and session-
+// dedup keeps only fresh threads — each board contributes ~60 new ones.
+const BOARDS: [&str; 8] = [
+    "all-gambia", "all-nba", "all-digital", "all-soccer", "all-ent", "all-game", "all-cba", "all-selling",
+];
+
 fn parse_list(html_str: &str) -> Vec<ListEntry> {
     let doc = Html::parse_document(html_str);
     let item_sel = Selector::parse(".text-list-model .list-item a").unwrap();
@@ -55,8 +63,11 @@ fn parse_detail(html_str: &str) -> DetailView {
     DetailView { author: String::new(), voteup: 0, body, images, answer_id: String::new() }
 }
 
-pub async fn list(http: &HttpClient) -> Result<Vec<ListEntry>> {
-    let html_str = http.get_text(&format!("{BASE}/all-gambia"), &[("user-agent", UA)]).await?;
+/// Fetch one aggregation board. `board` is a rotating index into `BOARDS` (wraps),
+/// so successive "load more" calls walk through the categories.
+pub async fn list(http: &HttpClient, board: usize) -> Result<Vec<ListEntry>> {
+    let b = BOARDS[board % BOARDS.len()];
+    let html_str = http.get_text(&format!("{BASE}/{b}"), &[("user-agent", UA)]).await?;
     Ok(parse_list(&html_str))
 }
 
@@ -102,7 +113,7 @@ mod tests {
     #[ignore = "live network"]
     async fn live_hupu_list() {
         let c = HttpClient::new().unwrap();
-        let rows = list(&c).await.unwrap();
+        let rows = list(&c, 0).await.unwrap();
         assert!(!rows.is_empty());
         eprintln!("hupu[0] = {} ({:?})", rows[0].title, rows[0].open_token);
     }
