@@ -4,14 +4,21 @@ pub mod v2ex;
 pub mod hupu;
 pub mod nga;
 pub mod linuxdo;
+pub mod tieba;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo }
+pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo, Tieba }
 
 impl Platform {
     /// All platforms, in landing-page picker order.
-    pub const ALL: [Platform; 5] =
-        [Platform::Zhihu, Platform::V2ex, Platform::Hupu, Platform::Nga, Platform::LinuxDo];
+    pub const ALL: [Platform; 6] = [
+        Platform::Zhihu,
+        Platform::V2ex,
+        Platform::Hupu,
+        Platform::Nga,
+        Platform::LinuxDo,
+        Platform::Tieba,
+    ];
 
     /// Human label shown in the (non-camouflaged) status line.
     pub fn label(self) -> &'static str {
@@ -21,11 +28,12 @@ impl Platform {
             Platform::Hupu => "虎扑",
             Platform::Nga => "NGA",
             Platform::LinuxDo => "Linux.do",
+            Platform::Tieba => "贴吧",
         }
     }
     /// Whether this platform needs a user-supplied cookie.
     pub fn needs_cookie(self) -> bool {
-        matches!(self, Platform::Zhihu | Platform::Nga | Platform::LinuxDo)
+        matches!(self, Platform::Zhihu | Platform::Nga | Platform::LinuxDo | Platform::Tieba)
     }
 }
 

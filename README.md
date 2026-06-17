@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/moyu-fish.svg)](https://www.npmjs.com/package/moyu-fish)
 
-在终端(cmd / PowerShell / macOS / Linux)里摸鱼。支持知乎、V2EX、虎扑、NGA、Linux.do,统一「列表 → 详情」交互,全程方向键浏览,界面就画在当前终端窗口里。
+在终端(cmd / PowerShell / macOS / Linux)里摸鱼。支持知乎、V2EX、虎扑、NGA、Linux.do、贴吧,统一「列表 → 详情」交互,全程方向键浏览,界面就画在当前终端窗口里。
 
 ## 安装
 
@@ -24,7 +24,7 @@ moyu
    cargo run --release
    ```
 2. 启动后是平台选择列表,`↑↓` 选平台、回车进入。想免登录先体验,选 **V2EX** 或 **虎扑**(无需 cookie)。
-   知乎 / NGA / Linux.do 需要 cookie,首次进入会进入登录流程,粘贴对应站点的 Cookie:
+   知乎 / NGA / Linux.do / 贴吧 需要 cookie,首次进入会进入登录流程,粘贴对应站点的 Cookie:
    登录该站点 → 按 **F12** → **Network** 标签 → 刷新 → 点任意一个本站请求 → 在 **Request Headers** 里复制 `cookie:` 整行的值 → 粘贴到命令行回车。
    程序会发一个测试请求验证 Cookie,通过后保存到本地配置(各平台独立),之后启动直接可用。
 
@@ -45,14 +45,16 @@ moyu
 | `/hupu` | 虎扑 |
 | `/nga` | NGA(需 cookie) |
 | `/linuxdo` | Linux.do(需 cookie) |
+| `/tieba` | 贴吧首页推送(需 cookie) |
 | `/quit` / `q` | 退出 |
 
 ## 多平台
 
-支持知乎、V2EX、虎扑、NGA、Linux.do,统一「列表 → 详情」交互。论坛帖子(V2EX/虎扑/NGA/Linux.do)的主楼与楼层回复拼成一页正文,可整页滚动。
+支持知乎、V2EX、虎扑、NGA、Linux.do、贴吧,统一「列表 → 详情」交互。论坛帖子(V2EX/虎扑/NGA/Linux.do/贴吧)的主楼与楼层回复拼成一页正文,可整页滚动。
 
 - **V2EX / 虎扑**:无需 cookie,直接 `/v2ex`、`/hupu` 即可。
 - **NGA / Linux.do**:需各自的登录 cookie。首次 `/nga`、`/linuxdo` 会进入登录流程,粘贴对应站点的 cookie 回车(NGA 需登录态,含真实 `ngaPassportUid`/`ngaPassportCid`;Linux.do 需含 `_t`/`_forum_session` 等)。各平台 cookie 独立保存。
+- **贴吧**:需登录 cookie。首次 `/tieba` 会进入登录流程,粘贴贴吧请求的完整 cookie。当前只采集首页推送流,标题格式为 `《板块名称》- 帖子名称`。
 
 ## 配置
 
@@ -70,6 +72,9 @@ cookie = "..."
 cookie = "..."
 
 [linuxdo]
+cookie = "..."
+
+[tieba]
 cookie = "..."
 ```
 

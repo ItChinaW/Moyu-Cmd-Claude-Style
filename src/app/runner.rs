@@ -53,6 +53,8 @@ struct Sources {
     nga_page: u32,
     linuxdo_cookie: String,
     linuxdo_page: u32,
+    tieba_cookie: String,
+    tieba_page: u32,
     http: Option<crate::net::HttpClient>,
 }
 
@@ -118,6 +120,7 @@ fn reset_cursor(src: &mut Sources, p: Platform) {
         Platform::Hupu => src.hupu_board = 0,
         Platform::Nga => src.nga_page = 1,
         Platform::LinuxDo => src.linuxdo_page = 0,
+        Platform::Tieba => src.tieba_page = 0,
     }
 }
 
@@ -143,6 +146,13 @@ async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Updat
             match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie, 0).await {
                 // Next "load more" starts at page 1.
                 Ok(list) => { src.linuxdo_page = 1; Update::Connected { platform, cookie, list } }
+                Err(e) => Update::ConnectFailed(e.to_string()),
+            }
+        }
+        Platform::Tieba => { src.tieba_cookie = cookie.clone(); src.tieba_page = 0;
+            let http = src.http();
+            match crate::platform::tieba::list(&http, &src.tieba_cookie, 0).await {
+                Ok(list) => { src.tieba_page = 1; Update::Connected { platform, cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             }
         }
@@ -186,6 +196,13 @@ async fn load_list(src: &mut Sources, p: Platform) -> Update {
                 Err(e) => Update::Error(e.to_string()),
             }
         }
+        Platform::Tieba => {
+            let page = src.tieba_page;
+            match crate::platform::tieba::list(&http, &src.tieba_cookie, page).await {
+                Ok(v) => { src.tieba_page = page + 1; Update::List(v) }
+                Err(e) => Update::Error(e.to_string()),
+            }
+        }
     }
 }
 
@@ -200,6 +217,7 @@ async fn load_detail(src: &mut Sources, p: Platform, token: &str) -> Update {
         Platform::Hupu => crate::platform::hupu::detail(&http, token).await,
         Platform::Nga => crate::platform::nga::detail(&http, &src.nga_cookie, token).await,
         Platform::LinuxDo => crate::platform::linuxdo::detail(&http, &src.linuxdo_cookie, token).await,
+        Platform::Tieba => crate::platform::tieba::detail(&http, &src.tieba_cookie, token).await,
     };
     match r { Ok(v) => Update::Details(v), Err(e) => Update::Error(e.to_string()) }
 }
@@ -586,6 +604,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Hupu => open_platform(app, Platform::Hupu, req_tx),
         Command::Nga => open_platform(app, Platform::Nga, req_tx),
         Command::LinuxDo => open_platform(app, Platform::LinuxDo, req_tx),
+        Command::Tieba => open_platform(app, Platform::Tieba, req_tx),
         Command::Hot => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);

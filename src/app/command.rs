@@ -11,6 +11,7 @@ pub fn parse(line: &str) -> Command {
         "/hupu" => Command::Hupu,
         "/nga" => Command::Nga,
         "/linuxdo" => Command::LinuxDo,
+        "/tieba" => Command::Tieba,
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
@@ -29,6 +30,7 @@ pub enum Command {
     Hupu,
     Nga,
     LinuxDo,
+    Tieba,
     Hot,
     Refresh,
     Search(String),
@@ -47,6 +49,7 @@ mod tests {
     fn parses_known_commands() {
         assert_eq!(parse("/zhihu"), Command::Zhihu);
         assert_eq!(parse("/hot"), Command::Hot);
+        assert_eq!(parse("/tieba"), Command::Tieba);
         assert_eq!(parse("/refresh"), Command::Refresh);
         assert_eq!(parse("/login"), Command::Login);
         assert_eq!(parse("/help"), Command::Help);

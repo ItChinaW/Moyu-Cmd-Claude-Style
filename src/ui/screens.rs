@@ -49,7 +49,7 @@ fn draw_root(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
-    // The login screen serves every cookie-gated platform (知乎/NGA/Linux.do), so
+    // The login screen serves every cookie-gated platform (知乎/NGA/Linux.do/贴吧), so
     // name the one being logged into rather than hardcoding 知乎.
     let plat = app.pending_login_platform.unwrap_or(app.active_platform).label();
     let msg = if let Some(e) = &app.error {
@@ -397,6 +397,11 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(" 命令(在 > 后输入)", head)),
         kv("/zhihu", "进入知乎(推荐流·最新)"),
+        kv("/v2ex", "V2EX"),
+        kv("/hupu", "虎扑"),
+        kv("/nga", "NGA(需 cookie)"),
+        kv("/linuxdo", "Linux.do(需 cookie)"),
+        kv("/tieba", "贴吧首页推送(需 cookie)"),
         kv("/hot", "热榜"),
         kv("/search 词", "搜索"),
         kv("/refresh", "刷新当前列表(也可按 r)"),

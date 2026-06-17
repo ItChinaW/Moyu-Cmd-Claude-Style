@@ -10,6 +10,8 @@ pub struct Config {
     pub nga: NgaConfig,
     #[serde(default)]
     pub linuxdo: LinuxDoConfig,
+    #[serde(default)]
+    pub tieba: TiebaConfig,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,6 +26,9 @@ pub struct NgaConfig { #[serde(default)] pub cookie: String }
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LinuxDoConfig { #[serde(default)] pub cookie: String }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TiebaConfig { #[serde(default)] pub cookie: String }
+
 impl Config {
     pub fn cookie_for(&self, p: crate::platform::Platform) -> String {
         use crate::platform::Platform::*;
@@ -31,6 +36,7 @@ impl Config {
             Zhihu => self.zhihu.cookie.clone(),
             Nga => self.nga.cookie.clone(),
             LinuxDo => self.linuxdo.cookie.clone(),
+            Tieba => self.tieba.cookie.clone(),
             _ => String::new(),
         }
     }
@@ -40,6 +46,7 @@ impl Config {
             Zhihu => self.zhihu.cookie = cookie,
             Nga => self.nga.cookie = cookie,
             LinuxDo => self.linuxdo.cookie = cookie,
+            Tieba => self.tieba.cookie = cookie,
             _ => {}
         }
     }
@@ -103,6 +110,7 @@ mod tests {
         cfg.zhihu.cookie = "z".into();
         cfg.nga.cookie = "n".into();
         cfg.linuxdo.cookie = "l".into();
+        cfg.tieba.cookie = "t".into();
         cfg.save_to(&path).unwrap();
         assert_eq!(cfg, Config::load_from(&path).unwrap());
     }
