@@ -26,6 +26,12 @@ pub enum ListSource {
     Search(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StockView {
+    Watchlist,
+    Market,
+}
+
 pub struct App {
     stack: Vec<Screen>,
     pub list: Vec<ListEntry>,
@@ -59,6 +65,7 @@ pub struct App {
     /// Cursor on the Root platform picker (index into `Platform::ALL`).
     pub root_cursor: usize,
     pub stock_force_refresh: bool,
+    pub stock_view: StockView,
 }
 
 impl App {
@@ -80,6 +87,7 @@ impl App {
             pending_login_platform: None,
             root_cursor: 0,
             stock_force_refresh: false,
+            stock_view: StockView::Watchlist,
         }
     }
 

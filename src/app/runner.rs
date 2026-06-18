@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::app::{App, ListSource};
+use crate::app::{App, ListSource, StockView};
 use crate::app::command::{self, Command};
 use crate::app::state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
@@ -28,6 +28,7 @@ pub enum Request {
     /// Zhihu-only: comments for an answer id.
     Comments(String),
     StockList { force: bool },
+    MarketList { force: bool },
     StockAdd(Vec<String>),
     StockDelete(String),
     FetchImages { answer_id: String, urls: Vec<String> },
@@ -108,6 +109,7 @@ async fn handle(src: &mut Sources, req: Request) -> Update {
             None => Update::Error("未登录知乎".into()),
         },
         Request::StockList { force } => load_stock_list(src, force).await,
+        Request::MarketList { force } => load_market_list(src, force).await,
         Request::StockAdd(codes) => match crate::platform::stock::add_watch_many(&codes) {
             Ok(_) => Update::StockChanged,
             Err(e) => Update::Error(e.to_string()),
@@ -224,6 +226,17 @@ async fn load_stock_list(src: &mut Sources, force: bool) -> Update {
     }
 }
 
+async fn load_market_list(src: &mut Sources, _force: bool) -> Update {
+    let http = src.http();
+    match crate::platform::stock::fetch_market_indices(&http).await {
+        Ok(items) => {
+            let rows = items.iter().map(crate::platform::stock::market_index_to_entry).collect();
+            Update::List(rows)
+        }
+        Err(e) => Update::Error(e.to_string()),
+    }
+}
+
 async fn load_detail(src: &mut Sources, p: Platform, token: &str) -> Update {
     let http = src.http();
     let r = match p {
@@ -321,7 +334,10 @@ pub async fn run_app(cookie: String) -> Result<()> {
             Some(upd) = upd_rx.recv() => apply_update(&mut app, upd, &req_tx),
             _ = stock_poll.tick() => {
                 if *app.screen() == Screen::List && app.active_platform == Platform::Stock && !app.loading {
-                    let _ = req_tx.send(Request::StockList { force: false });
+                    let _ = req_tx.send(match app.stock_view {
+                        StockView::Watchlist => Request::StockList { force: false },
+                        StockView::Market => Request::MarketList { force: false },
+                    });
                 }
             }
             _ = tick.tick() => {}
@@ -609,7 +625,10 @@ fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
         Platform::Zhihu => { let _ = req_tx.send(Request::More(Platform::Zhihu)); }
         Platform::Stock => {
             app.stock_force_refresh = true;
-            let _ = req_tx.send(Request::StockList { force: true });
+            let _ = req_tx.send(match app.stock_view {
+                StockView::Watchlist => Request::StockList { force: true },
+                StockView::Market => Request::MarketList { force: true },
+            });
         }
         // Forums "load more": advance the page and append fresh threads.
         p => { let _ = req_tx.send(Request::More(p)); }
@@ -622,6 +641,7 @@ fn open_platform(app: &mut App, p: Platform, req_tx: &mpsc::UnboundedSender<Requ
         app.camouflage = false;
         app.list_source = ListSource::Recommend;
         app.loading = true;
+        app.stock_view = StockView::Watchlist;
         let _ = req_tx.send(Request::StockList { force: false });
         return;
     }
@@ -652,6 +672,14 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Nga => open_platform(app, Platform::Nga, req_tx),
         Command::LinuxDo => open_platform(app, Platform::LinuxDo, req_tx),
         Command::Stock => open_platform(app, Platform::Stock, req_tx),
+        Command::Market => {
+            app.switch_platform(Platform::Stock);
+            app.camouflage = false;
+            app.list_source = ListSource::Recommend;
+            app.stock_view = StockView::Market;
+            app.loading = true;
+            let _ = req_tx.send(Request::MarketList { force: false });
+        }
         Command::Hot => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);
@@ -856,9 +884,23 @@ mod tests {
         let (tx, mut rx) = make_channel();
         dispatch_command(&mut app, Command::Stock, &tx);
         assert_eq!(app.active_platform, Platform::Stock);
+        assert_eq!(app.stock_view, StockView::Watchlist);
         match rx.try_recv() {
             Ok(Request::StockList { force: false }) => {}
             other => panic!("expected StockList {{ force: false }}, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn dispatch_market_lists_without_cookie() {
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Market, &tx);
+        assert_eq!(app.active_platform, Platform::Stock);
+        assert_eq!(app.stock_view, StockView::Market);
+        match rx.try_recv() {
+            Ok(Request::MarketList { force: false }) => {}
+            other => panic!("expected MarketList {{ force: false }}, got {:?}", other),
         }
     }
 
@@ -935,12 +977,27 @@ mod tests {
     fn stock_refresh_sends_list() {
         let mut app = App::new();
         app.switch_platform(Platform::Stock);
+        app.stock_view = StockView::Watchlist;
         app.push(Screen::List);
         let (tx, mut rx) = make_channel();
         handle_key(&mut app, KeyCode::Char('r'), &tx);
         match rx.try_recv() {
             Ok(Request::StockList { force: true }) => {}
             other => panic!("expected StockList {{ force: true }} refresh, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn market_refresh_sends_list() {
+        let mut app = App::new();
+        app.switch_platform(Platform::Stock);
+        app.stock_view = StockView::Market;
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        handle_key(&mut app, KeyCode::Char('r'), &tx);
+        match rx.try_recv() {
+            Ok(Request::MarketList { force: true }) => {}
+            other => panic!("expected MarketList {{ force: true }} refresh, got {:?}", other),
         }
     }
 

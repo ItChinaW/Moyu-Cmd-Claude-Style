@@ -113,16 +113,28 @@ fn pad_to_width(s: &str, cols: usize) -> String {
 
 fn draw_stock_list(f: &mut Frame, area: Rect, app: &App) {
     if app.list.is_empty() {
-        let lines = vec![
-            Line::from(Span::styled("股票自选为空", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-            Line::from(""),
-            Line::from("  /add 159941    添加 A 股"),
-            Line::from("  /add SPCX      添加美股"),
-            Line::from("  /delete SPCX   删除自选"),
-            Line::from("  r              刷新行情"),
-            Line::from(""),
-            Line::from(Span::styled("一行两列展示，自选数据保存在本地 config.toml。", Style::default().fg(Color::DarkGray))),
-        ];
+        let lines = if app.stock_view == crate::app::StockView::Market {
+            vec![
+                Line::from(Span::styled("全球指数为空", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+                Line::from(""),
+                Line::from("  /m             查看全球指数"),
+                Line::from("  r              刷新行情"),
+                Line::from(""),
+                Line::from(Span::styled("一行两列展示，包含 A 股与海外主要指数。", Style::default().fg(Color::DarkGray))),
+            ]
+        } else {
+            vec![
+                Line::from(Span::styled("股票自选为空", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+                Line::from(""),
+                Line::from("  /add 159941    添加 A 股"),
+                Line::from("  /add SPCX      添加美股"),
+                Line::from("  /delete SPCX   删除自选"),
+                Line::from("  /m             查看全球指数"),
+                Line::from("  r              刷新行情"),
+                Line::from(""),
+                Line::from(Span::styled("一行两列展示，自选数据保存在本地 config.toml。", Style::default().fg(Color::DarkGray))),
+            ]
+        };
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
         return;
     }
@@ -434,13 +446,18 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
     } else if app.loading {
         Line::from(Span::styled("> …".to_string(), Style::default().fg(Color::DarkGray)))
     } else if app.active_platform == crate::platform::Platform::Stock {
+        let suffix = if app.stock_view == crate::app::StockView::Market {
+            "   r刷新  /stock自选  /m指数  `老板键"
+        } else {
+            "   r刷新  /add 代码  /delete 代码  /m指数  `老板键"
+        };
         Line::from(vec![
-            Span::styled("股票 · ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!("> {}", app.command)),
             Span::styled(
-                "   r刷新  /add 代码  /delete 代码  `老板键",
+                if app.stock_view == crate::app::StockView::Market { "指数 · " } else { "股票 · " },
                 Style::default().fg(Color::DarkGray),
             ),
+            Span::raw(format!("> {}", app.command)),
+            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
         ])
     } else if app.camouflage {
         Line::from(format!("> {}", app.command))
@@ -473,6 +490,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("/nga", "NGA(需 cookie)"),
         kv("/linuxdo", "Linux.do(需 cookie)"),
         kv("/stock", "股票自选(A股/美股)"),
+        kv("/m", "全球指数"),
         kv("/add 代码", "添加自选,如 /add SPCX"),
         kv("/delete 代码", "删除自选,如 /delete 159941"),
         kv("/hot", "热榜"),

@@ -8,6 +8,24 @@ use crate::platform::{DetailView, ListEntry};
 
 const SINA_REFERER: &str = "https://finance.sina.com.cn";
 
+const SINA_INDICES: &[(&str, &str)] = &[
+    ("上证", "sh000001"),
+    ("沪深300", "sh000300"),
+    ("北证50", "bj899050"),
+    ("科创50", "sh000688"),
+    ("创业板", "sz399006"),
+    ("深证", "sz399001"),
+];
+
+const YAHOO_INDICES: &[(&str, &str)] = &[
+    ("纳指", "^NDX"),
+    ("日经225", "^N225"),
+    ("韩国综合", "^KS11"),
+    ("台湾加权", "^TWII"),
+    ("恒生指数", "^HSI"),
+    ("英国富时", "^FTSE"),
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuoteItem {
     pub symbol: String,
@@ -180,6 +198,38 @@ struct YahooQuoteSet {
     close: Vec<Option<f64>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketIndexItem {
+    pub label: String,
+    pub symbol: String,
+    pub price: f64,
+    pub change: f64,
+    pub change_percent: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooIndexResponse {
+    chart: YahooIndexChart,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooIndexChart {
+    result: Option<Vec<YahooIndexResult>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooIndexResult {
+    meta: YahooIndexMeta,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooIndexMeta {
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: f64,
+    #[serde(rename = "chartPreviousClose")]
+    chart_previous_close: f64,
+}
+
 async fn fetch_us_extended(http: &HttpClient, symbol: &str) -> Result<Option<(f64, f64)>> {
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d&includePrePost=true",
@@ -292,6 +342,64 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
     Ok(quotes)
 }
 
+async fn fetch_yahoo_index(http: &HttpClient, label: &str, symbol: &str) -> Result<Option<MarketIndexItem>> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+        urlencoding::encode(symbol)
+    );
+    let text = http.get_text(
+        &url,
+        &[("accept", "application/json"), ("user-agent", crate::net::USER_AGENT)],
+    ).await?;
+    let parsed: YahooIndexResponse = serde_json::from_str(&text).context("parse yahoo index json")?;
+    let Some(meta) = parsed.chart.result.and_then(|mut v| v.drain(..).next()).map(|r| r.meta) else {
+        return Ok(None);
+    };
+    if meta.regular_market_price <= 0.0 || meta.chart_previous_close <= 0.0 {
+        return Ok(None);
+    }
+    let change = meta.regular_market_price - meta.chart_previous_close;
+    let change_percent = change / meta.chart_previous_close * 100.0;
+    Ok(Some(MarketIndexItem {
+        label: label.to_string(),
+        symbol: symbol.to_string(),
+        price: meta.regular_market_price,
+        change,
+        change_percent,
+    }))
+}
+
+pub async fn fetch_market_indices(http: &HttpClient) -> Result<Vec<MarketIndexItem>> {
+    let mut out = Vec::new();
+
+    let sina_symbols = SINA_INDICES.iter().map(|(_, symbol)| *symbol).collect::<Vec<_>>().join(",");
+    let url = format!("https://hq.sinajs.cn/list={sina_symbols}");
+    let bytes = http
+        .get_bytes(&url, &[("referer", SINA_REFERER), ("user-agent", crate::net::USER_AGENT)])
+        .await?;
+    let (text, _, _) = encoding_rs::GBK.decode(&bytes);
+    for (idx, line) in text.lines().enumerate() {
+        let Some((label, symbol)) = SINA_INDICES.get(idx).copied() else { continue };
+        if let Some(q) = parse_sina_line(symbol, line) {
+            out.push(MarketIndexItem {
+                label: label.to_string(),
+                symbol: symbol.to_string(),
+                price: q.price,
+                change: q.change,
+                change_percent: q.change_percent,
+            });
+        }
+    }
+
+    for (label, symbol) in YAHOO_INDICES {
+        if let Some(item) = fetch_yahoo_index(http, label, symbol).await? {
+            out.push(item);
+        }
+    }
+
+    Ok(out)
+}
+
 fn fmt_pct(pct: f64) -> String {
     format!("{:+.2}%", pct)
 }
@@ -349,6 +457,31 @@ pub fn quote_to_entry(q: &QuoteItem) -> ListEntry {
             body,
             images: Vec::new(),
             answer_id: q.symbol.clone(),
+        }),
+    }
+}
+
+pub fn market_index_to_entry(item: &MarketIndexItem) -> ListEntry {
+    let title = format!("{} {:.2} 【{}】", item.label, item.price, fmt_pct(item.change_percent));
+    let subtitle = format!("代码: {}  涨跌额: {:+.2}", item.symbol, item.change);
+    let body = format!(
+        "{}\n代码: {}\n现价: {:.2}\n涨跌额: {:+.2}\n涨跌幅: {}",
+        item.label,
+        item.symbol,
+        item.price,
+        item.change,
+        fmt_pct(item.change_percent),
+    );
+    ListEntry {
+        title,
+        subtitle,
+        open_token: Some(item.symbol.clone()),
+        detail: Some(DetailView {
+            author: String::new(),
+            voteup: 0,
+            body,
+            images: Vec::new(),
+            answer_id: item.symbol.clone(),
         }),
     }
 }
@@ -457,6 +590,15 @@ mod tests {
             extended_source_ready: true,
         };
         assert!(quote_to_entry(&us).title.contains("SPCX (191.450 -0.20%) 191.820 【-4.95%】"));
+
+        let idx = MarketIndexItem {
+            label: "纳指".into(),
+            symbol: "^NDX".into(),
+            price: 29670.95,
+            change: -295.7,
+            change_percent: -0.99,
+        };
+        assert!(market_index_to_entry(&idx).title.contains("纳指 29670.95 【-0.99%】"));
     }
 
     #[test]
