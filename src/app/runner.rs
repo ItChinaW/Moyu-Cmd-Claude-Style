@@ -27,6 +27,9 @@ pub enum Request {
     Detail { platform: Platform, token: String },
     /// Zhihu-only: comments for an answer id.
     Comments(String),
+    StockList { force: bool },
+    StockAdd(String),
+    StockDelete(String),
     FetchImages { answer_id: String, urls: Vec<String> },
 }
 
@@ -40,6 +43,7 @@ pub enum Update {
     Details(Vec<DetailView>),
     Comments(Vec<CommentView>),
     ImagesReady { answer_id: String, paths: Vec<String> },
+    StockChanged,
     Error(String),
 }
 
@@ -53,8 +57,6 @@ struct Sources {
     nga_page: u32,
     linuxdo_cookie: String,
     linuxdo_page: u32,
-    tieba_cookie: String,
-    tieba_page: u32,
     http: Option<crate::net::HttpClient>,
 }
 
@@ -105,6 +107,15 @@ async fn handle(src: &mut Sources, req: Request) -> Update {
             Some(c) => match c.comments(&id).await { Ok(v) => Update::Comments(v), Err(e) => Update::Error(e.to_string()) },
             None => Update::Error("未登录知乎".into()),
         },
+        Request::StockList { force } => load_stock_list(src, force).await,
+        Request::StockAdd(code) => match crate::platform::stock::add_watch(&code) {
+            Ok(_) => Update::StockChanged,
+            Err(e) => Update::Error(e.to_string()),
+        },
+        Request::StockDelete(code) => match crate::platform::stock::delete_watch(&code) {
+            Ok(_) => Update::StockChanged,
+            Err(e) => Update::Error(e.to_string()),
+        },
         Request::FetchImages { answer_id, urls } => {
             let http = src.http();
             let paths = download_images(&http, &urls).await;
@@ -120,7 +131,7 @@ fn reset_cursor(src: &mut Sources, p: Platform) {
         Platform::Hupu => src.hupu_board = 0,
         Platform::Nga => src.nga_page = 1,
         Platform::LinuxDo => src.linuxdo_page = 0,
-        Platform::Tieba => src.tieba_page = 0,
+        Platform::Stock => {}
     }
 }
 
@@ -146,13 +157,6 @@ async fn connect(src: &mut Sources, platform: Platform, cookie: String) -> Updat
             match crate::platform::linuxdo::list(&http, &src.linuxdo_cookie, 0).await {
                 // Next "load more" starts at page 1.
                 Ok(list) => { src.linuxdo_page = 1; Update::Connected { platform, cookie, list } }
-                Err(e) => Update::ConnectFailed(e.to_string()),
-            }
-        }
-        Platform::Tieba => { src.tieba_cookie = cookie.clone(); src.tieba_page = 0;
-            let http = src.http();
-            match crate::platform::tieba::list(&http, &src.tieba_cookie, 0).await {
-                Ok(list) => { src.tieba_page = 1; Update::Connected { platform, cookie, list } }
                 Err(e) => Update::ConnectFailed(e.to_string()),
             }
         }
@@ -196,13 +200,27 @@ async fn load_list(src: &mut Sources, p: Platform) -> Update {
                 Err(e) => Update::Error(e.to_string()),
             }
         }
-        Platform::Tieba => {
-            let page = src.tieba_page;
-            match crate::platform::tieba::list(&http, &src.tieba_cookie, page).await {
-                Ok(v) => { src.tieba_page = page + 1; Update::List(v) }
-                Err(e) => Update::Error(e.to_string()),
-            }
+        Platform::Stock => {
+            load_stock_list(src, false).await
         }
+    }
+}
+
+async fn load_stock_list(src: &mut Sources, force: bool) -> Update {
+    let http = src.http();
+    match crate::platform::stock::load_watchlist() {
+        Ok(mut items) => {
+            let quotes = match crate::platform::stock::fetch_quotes(&http, &items, force).await {
+                Ok(q) => q,
+                Err(e) => return Update::Error(e.to_string()),
+            };
+            if crate::platform::stock::sync_names(&mut items, &quotes) {
+                let _ = crate::platform::stock::save_watchlist(items);
+            }
+            let rows = quotes.iter().map(crate::platform::stock::quote_to_entry).collect();
+            Update::List(rows)
+        }
+        Err(e) => Update::Error(e.to_string()),
     }
 }
 
@@ -217,7 +235,7 @@ async fn load_detail(src: &mut Sources, p: Platform, token: &str) -> Update {
         Platform::Hupu => crate::platform::hupu::detail(&http, token).await,
         Platform::Nga => crate::platform::nga::detail(&http, &src.nga_cookie, token).await,
         Platform::LinuxDo => crate::platform::linuxdo::detail(&http, &src.linuxdo_cookie, token).await,
-        Platform::Tieba => crate::platform::tieba::detail(&http, &src.tieba_cookie, token).await,
+        Platform::Stock => Ok(vec![]),
     };
     match r { Ok(v) => Update::Details(v), Err(e) => Update::Error(e.to_string()) }
 }
@@ -285,6 +303,7 @@ pub async fn run_app(cookie: String) -> Result<()> {
 
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(120));
+    let mut stock_poll = tokio::time::interval(Duration::from_secs(60));
 
     let result = loop {
         if let Err(e) = term.draw(|f| crate::ui::draw(f, &app)) { break Err(e.into()); }
@@ -300,6 +319,11 @@ pub async fn run_app(cookie: String) -> Result<()> {
                 }
             }
             Some(upd) = upd_rx.recv() => apply_update(&mut app, upd, &req_tx),
+            _ = stock_poll.tick() => {
+                if *app.screen() == Screen::List && app.active_platform == Platform::Stock && !app.loading {
+                    let _ = req_tx.send(Request::StockList { force: false });
+                }
+            }
             _ = tick.tick() => {}
         }
     };
@@ -344,7 +368,11 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
         }
         Update::List(list) => {
             app.error = None;
-            app.apply_list_deduped(list);
+            if app.active_platform == Platform::Stock {
+                app.replace_list(list);
+            } else {
+                app.apply_list_deduped(list);
+            }
             match app.screen() {
                 Screen::List => {}
                 Screen::Login => app.replace(Screen::List),
@@ -375,6 +403,11 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
         Update::Comments(c) => {
             app.error = None; app.comments = c; app.comment_scroll = 0;
             app.push(Screen::Comments);
+        }
+        Update::StockChanged => {
+            app.error = None;
+            app.loading = true;
+            let _ = req_tx.send(Request::StockList { force: true });
         }
         Update::ConnectFailed(e) => { app.error = Some(e); app.replace(Screen::Login); }
         Update::Error(e) => { app.error = Some(e); }
@@ -462,6 +495,9 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         },
         KeyCode::Left => app.back(),
         KeyCode::Right | KeyCode::Tab if *app.screen() == Screen::Detail => {
+            if app.active_platform == Platform::Stock {
+                return;
+            }
             // clone the id first so the immutable borrow ends before we mutate `app`
             if let Some(aid) = app.current_detail().map(|d| d.answer_id.clone()) {
                 app.loading = true;
@@ -571,6 +607,10 @@ fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
             if let ListSource::Search(q) = app.list_source.clone() { let _ = req_tx.send(Request::Search(q)); }
         }
         Platform::Zhihu => { let _ = req_tx.send(Request::More(Platform::Zhihu)); }
+        Platform::Stock => {
+            app.stock_force_refresh = true;
+            let _ = req_tx.send(Request::StockList { force: true });
+        }
         // Forums "load more": advance the page and append fresh threads.
         p => { let _ = req_tx.send(Request::More(p)); }
     }
@@ -578,6 +618,13 @@ fn refresh(app: &mut App, req_tx: &mpsc::UnboundedSender<Request>) {
 
 fn open_platform(app: &mut App, p: Platform, req_tx: &mpsc::UnboundedSender<Request>) {
     app.switch_platform(p);
+    if p == Platform::Stock {
+        app.camouflage = false;
+        app.list_source = ListSource::Recommend;
+        app.loading = true;
+        let _ = req_tx.send(Request::StockList { force: false });
+        return;
+    }
     if p.needs_cookie() {
         let cookie = {
             let c = crate::config::Config::load().unwrap_or_default().cookie_for(p);
@@ -604,7 +651,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Hupu => open_platform(app, Platform::Hupu, req_tx),
         Command::Nga => open_platform(app, Platform::Nga, req_tx),
         Command::LinuxDo => open_platform(app, Platform::LinuxDo, req_tx),
-        Command::Tieba => open_platform(app, Platform::Tieba, req_tx),
+        Command::Stock => open_platform(app, Platform::Stock, req_tx),
         Command::Hot => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);
@@ -623,6 +670,14 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
             app.list_source = ListSource::Search(q.clone());
             app.loading = true;
             let _ = req_tx.send(Request::Search(q));
+        }
+        Command::Add(code) => {
+            app.loading = true;
+            let _ = req_tx.send(Request::StockAdd(code));
+        }
+        Command::Delete(code) => {
+            app.loading = true;
+            let _ = req_tx.send(Request::StockDelete(code));
         }
         Command::Login => { app.error = None; app.replace(Screen::Login); }
         Command::Help => { if *app.screen() != Screen::Help { app.push(Screen::Help); } }
@@ -786,6 +841,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dispatch_stock_lists_without_cookie() {
+        let mut app = App::new();
+        let (tx, mut rx) = make_channel();
+        dispatch_command(&mut app, Command::Stock, &tx);
+        assert_eq!(app.active_platform, Platform::Stock);
+        match rx.try_recv() {
+            Ok(Request::List(Platform::Stock)) => {}
+            other => panic!("expected List(Stock), got {:?}", other),
+        }
+    }
+
     // 4. dispatch_quit_sets_should_quit
     #[test]
     fn dispatch_quit_sets_should_quit() {
@@ -853,6 +920,19 @@ mod tests {
             other => panic!("expected More(Zhihu) refresh, got {:?}", other),
         }
         assert!(app.loading);
+    }
+
+    #[test]
+    fn stock_refresh_sends_list() {
+        let mut app = App::new();
+        app.switch_platform(Platform::Stock);
+        app.push(Screen::List);
+        let (tx, mut rx) = make_channel();
+        handle_key(&mut app, KeyCode::Char('r'), &tx);
+        match rx.try_recv() {
+            Ok(Request::List(Platform::Stock)) => {}
+            other => panic!("expected List(Stock) refresh, got {:?}", other),
+        }
     }
 
     // 7. q_on_root_quits_when_not_composing

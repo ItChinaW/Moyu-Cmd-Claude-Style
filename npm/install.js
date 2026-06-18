@@ -19,7 +19,7 @@ if (process.platform === "darwin") {
   asset = "moyu-win32-x64.exe";
 } else {
   console.error(
-    `moyu: 暂未提供 ${process.platform}/${process.arch} 的预编译包。` +
+    `moyu-stock: 暂未提供 ${process.platform}/${process.arch} 的预编译包。` +
       `\n可从 https://github.com/${REPO}/releases 手动下载,或用 cargo install --git https://github.com/${REPO} 自行编译。`
   );
   process.exit(0); // don't hard-fail the whole npm install
@@ -59,13 +59,16 @@ function download(u, dest, redirects = 0) {
 
 (async () => {
   try {
-    console.log(`moyu: 正在下载 ${asset} …`);
+    console.log(`moyu-stock: 正在下载 ${asset} …`);
     await download(url, outPath);
     if (!isWin) fs.chmodSync(outPath, 0o755);
-    console.log("moyu: 安装完成,直接运行 `moyu` 即可。");
+    console.log(
+      "moyu-stock: 安装完成,直接运行 `moyu-stock` 即可。\n" +
+      "股票夜盘抓取依赖会在首次进入股票模块时按需准备。"
+    );
   } catch (e) {
     console.error(
-      `moyu: 下载预编译二进制失败(${e.message})。\n` +
+      `moyu-stock: 下载预编译二进制失败(${e.message})。\n` +
         `请确认该版本的 Release 已发布,或从 https://github.com/${REPO}/releases 手动下载 ${asset} 放到:\n  ${outPath}`
     );
     process.exit(0); // soft-fail: let the user fix it manually without breaking install

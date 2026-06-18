@@ -49,7 +49,7 @@ fn draw_root(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
-    // The login screen serves every cookie-gated platform (知乎/NGA/Linux.do/贴吧), so
+    // The login screen serves every cookie-gated platform (知乎/NGA/Linux.do), so
     // name the one being logged into rather than hardcoding 知乎.
     let plat = app.pending_login_platform.unwrap_or(app.active_platform).label();
     let msg = if let Some(e) = &app.error {
@@ -63,8 +63,12 @@ fn draw_login(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_list(f: &mut Frame, area: Rect, app: &App) {
-    if app.camouflage {
+    if app.camouflage && app.active_platform != crate::platform::Platform::Stock {
         draw_list_todos(f, area, app);
+        return;
+    }
+    if app.active_platform == crate::platform::Platform::Stock {
+        draw_stock_list(f, area, app);
         return;
     }
     let items: Vec<ListItem> = app.list.iter().enumerate().map(|(i, e)| {
@@ -88,6 +92,64 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App) {
     let mut state = ListState::default();
     if !app.list.is_empty() { state.select(Some(app.list_cursor())); }
     f.render_stateful_widget(List::new(items), area, &mut state);
+}
+
+fn pad_to_width(s: &str, cols: usize) -> String {
+    let mut out = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        let cw = if ch.is_ascii() { 1 } else { 2 };
+        if w + cw > cols {
+            break;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    if w < cols {
+        out.push_str(&" ".repeat(cols - w));
+    }
+    out
+}
+
+fn draw_stock_list(f: &mut Frame, area: Rect, app: &App) {
+    if app.list.is_empty() {
+        let lines = vec![
+            Line::from(Span::styled("股票自选为空", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Line::from(""),
+            Line::from("  /add 159941    添加 A 股"),
+            Line::from("  /add SPCX      添加美股"),
+            Line::from("  /delete SPCX   删除自选"),
+            Line::from("  r              刷新行情"),
+            Line::from(""),
+            Line::from(Span::styled("一行两列展示，自选数据保存在本地 config.toml。", Style::default().fg(Color::DarkGray))),
+        ];
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+        return;
+    }
+    let col_w = (area.width as usize).saturating_sub(3) / 2;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let row_count = app.list.len().div_ceil(2);
+    for row in 0..row_count {
+        let left_idx = row * 2;
+        let right_idx = left_idx + 1;
+        let left = render_stock_cell(app, left_idx, col_w);
+        let right = render_stock_cell(app, right_idx, col_w);
+        lines.push(Line::from(format!("{}   {}", left.0, right.0)));
+        lines.push(Line::from(format!("{}   {}", left.1, right.1)));
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+}
+
+fn render_stock_cell(app: &App, idx: usize, width: usize) -> (String, String) {
+    let Some(item) = app.list.get(idx) else {
+        return (" ".repeat(width), " ".repeat(width));
+    };
+    let selected = idx == app.list_cursor();
+    let marker = if selected { "> " } else { "  " };
+    let title_w = width.saturating_sub(marker.len());
+    let line1 = pad_to_width(&format!("{marker}{}", item.title), width);
+    let line2 = pad_to_width(&format!("  {}", item.subtitle), title_w + 2);
+    (line1, line2)
 }
 
 /// Truncate to a single display line of at most `cols` terminal columns, cutting
@@ -371,6 +433,15 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(format!("> {e}"), Style::default().fg(Color::Red)))
     } else if app.loading {
         Line::from(Span::styled("> …".to_string(), Style::default().fg(Color::DarkGray)))
+    } else if app.active_platform == crate::platform::Platform::Stock {
+        Line::from(vec![
+            Span::styled("股票 · ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("> {}", app.command)),
+            Span::styled(
+                "   r刷新  /add 代码  /delete 代码  `老板键",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])
     } else if app.camouflage {
         Line::from(format!("> {}", app.command))
     } else {
@@ -401,10 +472,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("/hupu", "虎扑"),
         kv("/nga", "NGA(需 cookie)"),
         kv("/linuxdo", "Linux.do(需 cookie)"),
-        kv("/tieba", "贴吧首页推送(需 cookie)"),
+        kv("/stock", "股票自选(A股/美股)"),
+        kv("/add 代码", "添加自选,如 /add SPCX"),
+        kv("/delete 代码", "删除自选,如 /delete 159941"),
         kv("/hot", "热榜"),
         kv("/search 词", "搜索"),
-        kv("/refresh", "刷新当前列表(也可按 r)"),
+        kv("/refresh", "刷新当前列表(股票为强制刷新,也可按 r)"),
         kv("/login", "重新登录 / 切换账号(粘贴新 Cookie)"),
         kv("/help", "显示本帮助(/? 亦可)"),
         kv("/back", "返回上一级"),
@@ -418,7 +491,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("n / p", "上 / 下一个回答(详情页)"),
         kv("1-9", "在编辑器打开第 N 张图(详情页)"),
         kv("c", "开关 Claude 伪装(详情页)"),
-        kv("r", "刷新(列表页)"),
+        kv("r", "刷新(列表页; 股票为强制刷新)"),
         kv("q", "退出"),
         kv("` 或 ·", "老板键:一键隐藏 / 恢复(中英文输入法都可)"),
         Line::from(""),

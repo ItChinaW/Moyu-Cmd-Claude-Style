@@ -11,7 +11,7 @@ pub struct Config {
     #[serde(default)]
     pub linuxdo: LinuxDoConfig,
     #[serde(default)]
-    pub tieba: TiebaConfig,
+    pub stock: StockConfig,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -27,7 +27,23 @@ pub struct NgaConfig { #[serde(default)] pub cookie: String }
 pub struct LinuxDoConfig { #[serde(default)] pub cookie: String }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-pub struct TiebaConfig { #[serde(default)] pub cookie: String }
+pub struct StockConfig {
+    #[serde(default)]
+    pub watchlist: Vec<StockWatchItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockWatchItem {
+    pub code: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+impl Default for StockWatchItem {
+    fn default() -> Self {
+        Self { code: String::new(), name: String::new() }
+    }
+}
 
 impl Config {
     pub fn cookie_for(&self, p: crate::platform::Platform) -> String {
@@ -36,7 +52,6 @@ impl Config {
             Zhihu => self.zhihu.cookie.clone(),
             Nga => self.nga.cookie.clone(),
             LinuxDo => self.linuxdo.cookie.clone(),
-            Tieba => self.tieba.cookie.clone(),
             _ => String::new(),
         }
     }
@@ -46,7 +61,6 @@ impl Config {
             Zhihu => self.zhihu.cookie = cookie,
             Nga => self.nga.cookie = cookie,
             LinuxDo => self.linuxdo.cookie = cookie,
-            Tieba => self.tieba.cookie = cookie,
             _ => {}
         }
     }
@@ -110,7 +124,7 @@ mod tests {
         cfg.zhihu.cookie = "z".into();
         cfg.nga.cookie = "n".into();
         cfg.linuxdo.cookie = "l".into();
-        cfg.tieba.cookie = "t".into();
+        cfg.stock.watchlist = vec![StockWatchItem { code: "159941".into(), name: "纳指ETF".into() }];
         cfg.save_to(&path).unwrap();
         assert_eq!(cfg, Config::load_from(&path).unwrap());
     }

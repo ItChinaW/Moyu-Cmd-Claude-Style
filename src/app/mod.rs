@@ -58,6 +58,7 @@ pub struct App {
     pub pending_login_platform: Option<crate::platform::Platform>,
     /// Cursor on the Root platform picker (index into `Platform::ALL`).
     pub root_cursor: usize,
+    pub stock_force_refresh: bool,
 }
 
 impl App {
@@ -78,6 +79,7 @@ impl App {
             active_platform: crate::platform::Platform::Zhihu,
             pending_login_platform: None,
             root_cursor: 0,
+            stock_force_refresh: false,
         }
     }
 
@@ -102,6 +104,11 @@ impl App {
             self.list = fresh;
             self.list_cursor = 0;
         }
+    }
+
+    pub fn replace_list(&mut self, items: Vec<ListEntry>) {
+        self.list = items;
+        self.list_cursor = 0;
     }
 
     /// "Load more": append rows not yet seen this session onto the current list,

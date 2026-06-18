@@ -1,4 +1,7 @@
 /target
+/node_modules
+/npm/node_modules
+/.DS_Store
 
 # build/dist artifacts
 /dist

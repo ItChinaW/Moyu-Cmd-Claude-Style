@@ -11,7 +11,7 @@ pub fn parse(line: &str) -> Command {
         "/hupu" => Command::Hupu,
         "/nga" => Command::Nga,
         "/linuxdo" => Command::LinuxDo,
-        "/tieba" => Command::Tieba,
+        "/stock" => Command::Stock,
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
@@ -19,6 +19,8 @@ pub fn parse(line: &str) -> Command {
         "/back" => Command::Back,
         "/quit" => Command::Quit,
         "/search" if !rest.is_empty() => Command::Search(rest.to_string()),
+        "/add" if !rest.is_empty() => Command::Add(rest.to_string()),
+        "/delete" if !rest.is_empty() => Command::Delete(rest.to_string()),
         _ => Command::Unknown(line.to_string()),
     }
 }
@@ -30,10 +32,12 @@ pub enum Command {
     Hupu,
     Nga,
     LinuxDo,
-    Tieba,
+    Stock,
     Hot,
     Refresh,
     Search(String),
+    Add(String),
+    Delete(String),
     Login,
     Help,
     Back,
@@ -49,7 +53,7 @@ mod tests {
     fn parses_known_commands() {
         assert_eq!(parse("/zhihu"), Command::Zhihu);
         assert_eq!(parse("/hot"), Command::Hot);
-        assert_eq!(parse("/tieba"), Command::Tieba);
+        assert_eq!(parse("/stock"), Command::Stock);
         assert_eq!(parse("/refresh"), Command::Refresh);
         assert_eq!(parse("/login"), Command::Login);
         assert_eq!(parse("/help"), Command::Help);
@@ -57,6 +61,8 @@ mod tests {
         assert_eq!(parse("/back"), Command::Back);
         assert_eq!(parse("/quit"), Command::Quit);
         assert_eq!(parse("/search 程序员 摸鱼"), Command::Search("程序员 摸鱼".into()));
+        assert_eq!(parse("/add SPCX"), Command::Add("SPCX".into()));
+        assert_eq!(parse("/delete 159941"), Command::Delete("159941".into()));
     }
 
     #[test]
@@ -64,5 +70,6 @@ mod tests {
         assert_eq!(parse("  /zhihu  "), Command::Zhihu);
         assert_eq!(parse("/foo"), Command::Unknown("/foo".into()));
         assert_eq!(parse("/search"), Command::Unknown("/search".into())); // needs an arg
+        assert_eq!(parse("/add"), Command::Unknown("/add".into()));
     }
 }

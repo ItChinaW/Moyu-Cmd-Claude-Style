@@ -11,7 +11,7 @@ const binPath = path.join(__dirname, binName);
 
 if (!fs.existsSync(binPath)) {
   console.error(
-    "moyu: 找不到可执行文件。请重新安装:npm i -g moyu-fish\n" +
+    "moyu-stock: 找不到可执行文件。请重新安装:npm i -g moyu-fish\n" +
       "(若安装时跳过了脚本,运行:node " +
       path.join(__dirname, "..", "install.js") +
       " )"
@@ -21,7 +21,7 @@ if (!fs.existsSync(binPath)) {
 
 const res = spawnSync(binPath, process.argv.slice(2), { stdio: "inherit" });
 if (res.error) {
-  console.error("moyu: 启动失败 -", res.error.message);
+  console.error("moyu-stock: 启动失败 -", res.error.message);
   process.exit(1);
 }
 process.exit(res.status === null ? 1 : res.status);
