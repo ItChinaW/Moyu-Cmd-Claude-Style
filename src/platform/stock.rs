@@ -207,15 +207,7 @@ async fn fetch_us_extended(http: &HttpClient, symbol: &str) -> Result<Option<(f6
     for idx in (0..ts.len()).rev() {
         let Some(close) = closes.get(idx).and_then(|v| *v) else { continue };
         let t = ts[idx];
-        let session_hit = if t < pre_start.unwrap() {
-            true
-        } else if t < reg_start.unwrap() {
-            true
-        } else if t >= reg_end.unwrap() {
-            true
-        } else {
-            false
-        };
+        let session_hit = t < pre_start.unwrap() || t < reg_start.unwrap() || t >= reg_end.unwrap();
         if session_hit && (close - regular).abs() > f64::EPSILON {
             let pct = (close - regular) / regular * 100.0;
             return Ok(Some((close, pct)));
@@ -305,7 +297,7 @@ fn fmt_pct(pct: f64) -> String {
 }
 
 fn fmt_price(v: f64) -> String {
-    if v >= 100.0 { format!("{v:.3}") } else { format!("{v:.3}") }
+    format!("{v:.3}")
 }
 
 pub fn quote_to_entry(q: &QuoteItem) -> ListEntry {

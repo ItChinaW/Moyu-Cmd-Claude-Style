@@ -32,17 +32,11 @@ pub struct StockConfig {
     pub watchlist: Vec<StockWatchItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StockWatchItem {
     pub code: String,
     #[serde(default)]
     pub name: String,
-}
-
-impl Default for StockWatchItem {
-    fn default() -> Self {
-        Self { code: String::new(), name: String::new() }
-    }
 }
 
 impl Config {
