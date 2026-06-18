@@ -4,7 +4,7 @@ version = "0.2.4"
 edition = "2021"
 
 [[bin]]
-name = "moyu-stock"
+name = "moyu"
 path = "src/main.rs"
 
 [dependencies]

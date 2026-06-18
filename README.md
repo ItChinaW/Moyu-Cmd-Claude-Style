@@ -12,9 +12,9 @@ npm 包地址:https://www.npmjs.com/package/moyu-fish
 # 直接运行(无需安装)
 npx moyu-fish
 
-# 或全局安装(调试版命令为 moyu-stock)
+# 或全局安装
 npm install -g moyu-fish
-moyu-stock
+moyu
 ```
 
 安装 npm 包时不会预先下载股票夜盘抓取依赖；首次进入股票模块并触发夜盘抓取时，程序会按需准备 Playwright Chromium。一般不需要用户自己额外安装 Chrome 浏览器。
@@ -23,7 +23,7 @@ moyu-stock
 
 1. 运行:
    ```bash
-   cargo run --release --bin moyu-stock
+   cargo run --release --bin moyu
    ```
 2. 启动后是平台选择列表,`↑↓` 选平台、回车进入。想免登录先体验,选 **V2EX**、**虎扑** 或 **股票**(无需 cookie)。
    知乎 / NGA / Linux.do 需要 cookie,首次进入会进入登录流程,粘贴对应站点的 Cookie:

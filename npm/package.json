@@ -3,7 +3,7 @@
   "version": "0.2.4",
   "description": "在终端里摸鱼的多平台客户端(知乎/V2EX/虎扑/NGA/Linux.do/股票),带 Claude Code 风格伪装与老板键",
   "bin": {
-    "moyu-stock": "bin/moyu.js"
+    "moyu": "bin/moyu.js"
   },
   "dependencies": {
     "playwright": "^1.53.2"
