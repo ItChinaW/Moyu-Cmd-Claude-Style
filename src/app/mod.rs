@@ -3,7 +3,7 @@ pub mod command;
 pub mod runner;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
-use std::collections::HashSet;
+use std::collections::{HashSet, BTreeSet};
 
 /// Dedup key for a recommend row — answer id if known (each card is one answer),
 /// else question id, else the title.
@@ -29,7 +29,6 @@ pub enum ListSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StockView {
     Watchlist,
-    Market,
 }
 
 pub struct App {
@@ -66,6 +65,8 @@ pub struct App {
     pub root_cursor: usize,
     pub stock_force_refresh: bool,
     pub stock_view: StockView,
+    pub stock_refreshing: BTreeSet<usize>,
+    pub spinner_phase: usize,
 }
 
 impl App {
@@ -88,6 +89,8 @@ impl App {
             root_cursor: 0,
             stock_force_refresh: false,
             stock_view: StockView::Watchlist,
+            stock_refreshing: BTreeSet::new(),
+            spinner_phase: 0,
         }
     }
 

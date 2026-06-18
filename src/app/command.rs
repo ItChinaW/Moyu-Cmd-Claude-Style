@@ -12,7 +12,6 @@ pub fn parse(line: &str) -> Command {
         "/nga" => Command::Nga,
         "/linuxdo" => Command::LinuxDo,
         "/stock" => Command::Stock,
-        "/m" => Command::Market,
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
@@ -34,7 +33,6 @@ pub enum Command {
     Nga,
     LinuxDo,
     Stock,
-    Market,
     Hot,
     Refresh,
     Search(String),
@@ -56,7 +54,6 @@ mod tests {
         assert_eq!(parse("/zhihu"), Command::Zhihu);
         assert_eq!(parse("/hot"), Command::Hot);
         assert_eq!(parse("/stock"), Command::Stock);
-        assert_eq!(parse("/m"), Command::Market);
         assert_eq!(parse("/refresh"), Command::Refresh);
         assert_eq!(parse("/login"), Command::Login);
         assert_eq!(parse("/help"), Command::Help);
