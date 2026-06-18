@@ -364,10 +364,6 @@ pub fn save_watchlist(items: Vec<StockWatchItem>) -> Result<()> {
     cfg.save()
 }
 
-pub fn add_watch(code: &str) -> Result<Vec<StockWatchItem>> {
-    add_watch_many(&[code.to_string()])
-}
-
 pub fn add_watch_many(codes: &[String]) -> Result<Vec<StockWatchItem>> {
     let mut items = load_watchlist()?;
     let mut changed = false;
