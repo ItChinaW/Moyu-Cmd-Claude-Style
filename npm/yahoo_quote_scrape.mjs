@@ -45,43 +45,50 @@ if (!symbol) {
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+const NUM_RE = /^-?[\d,]+\.\d+$/;
+const PCT_RE = /^\(([+-][\d.]+)%\)$/;
+const SESS_RE = /(At close|Overnight|Pre-Market|Pre-market|After hours|After-hours|As of|Market open|Live|Closed)/i;
+const REGULAR_RE = /At close|As of|Market open|Live|Closed/i;
+const OVERNIGHT_RE = /Overnight/i;
+const PRE_RE = /Pre-Market|Pre-market/i;
+const POST_RE = /After hours|After-hours/i;
+const num = (s) => parseFloat(s.replace(/,/g, ""));
+
 function parseYahooHeader(ticker, text) {
   const lines = text
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const numRe = /^-?[\d,]+\.\d+$/;
-  const pctRe = /^\(([+-][\d.]+)%\)$/;
-  const sessRe = /(At close|Overnight|Pre-Market|Pre-market|After hours|After-hours|As of|Market open|Live|Closed)/i;
-  const num = (s) => parseFloat(s.replace(/,/g, ""));
-
   const blocks = [];
   let price = null;
   let pct = null;
   for (const l of lines) {
-    if (numRe.test(l)) {
+    if (NUM_RE.test(l)) {
       if (price === null) price = num(l);
       continue;
     }
-    const mp = l.match(pctRe);
+    const mp = l.match(PCT_RE);
     if (mp && price !== null) {
       pct = num(mp[1]);
       continue;
     }
-    if (sessRe.test(l) && price !== null) {
+    if (SESS_RE.test(l) && price !== null) {
       blocks.push({ price, pct: pct ?? 0, label: l });
       price = null;
       pct = null;
     }
   }
+  return buildQuoteFromBlocks(ticker, blocks);
+}
+
+function buildQuoteFromBlocks(ticker, blocks) {
   if (!blocks.length) return null;
 
-  const regular =
-    blocks.find((b) => /At close|As of|Market open|Live|Closed/i.test(b.label)) ?? blocks[0];
-  const overnight = blocks.find((b) => /Overnight/i.test(b.label));
-  const pre = blocks.find((b) => /Pre-Market|Pre-market/i.test(b.label));
-  const post = blocks.find((b) => /After hours|After-hours/i.test(b.label));
+  const regular = blocks.find((b) => REGULAR_RE.test(b.label)) ?? blocks[0];
+  const overnight = blocks.find((b) => OVERNIGHT_RE.test(b.label));
+  const pre = blocks.find((b) => PRE_RE.test(b.label));
+  const post = blocks.find((b) => POST_RE.test(b.label));
   const ext = overnight ?? post ?? pre;
   const previousClose =
     regular.pct !== 0 ? regular.price / (1 + regular.pct / 100) : regular.price;
@@ -97,6 +104,43 @@ function parseYahooHeader(ticker, text) {
   };
 }
 
+function parseYahooPieces(ticker, pieces) {
+  const blocks = [];
+  const sessionIndexes = pieces
+    .map((value, index) => (SESS_RE.test(value) ? index : -1))
+    .filter((index) => index >= 0);
+
+  for (const index of sessionIndexes) {
+    let price = null;
+    let pct = null;
+    for (let i = index - 1; i >= 0 && i >= index - 10; i -= 1) {
+      const value = pieces[i];
+      if (pct === null) {
+        const pctMatch = value.match(PCT_RE);
+        if (pctMatch) {
+          pct = num(pctMatch[1]);
+          continue;
+        }
+      }
+      if (price === null && NUM_RE.test(value)) {
+        price = num(value);
+      }
+      if (price !== null && pct !== null) {
+        break;
+      }
+    }
+    if (price !== null) {
+      blocks.push({
+        price,
+        pct: pct ?? 0,
+        label: pieces[index],
+      });
+    }
+  }
+
+  return buildQuoteFromBlocks(ticker, blocks);
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   const ctx = await browser.newContext({
@@ -110,13 +154,61 @@ try {
     timeout: 45_000,
   });
   await page.waitForTimeout(3500);
-  const text = await page.evaluate(() => {
+  let snapshot = await page.evaluate(() => {
     const region =
       document.querySelector('[data-testid="quote-hdr"], [data-testid="quote-price"]') ||
       document.body;
-    return region.innerText.slice(0, 800);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const value = (node.textContent || "").replace(/\s+/g, " ").trim();
+        return value ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    const pieces = [];
+    while (walker.nextNode()) {
+      const value = (walker.currentNode.textContent || "").replace(/\s+/g, " ").trim();
+      if (value && value.length <= 120) {
+        pieces.push(value);
+      }
+      if (pieces.length >= 400) {
+        break;
+      }
+    }
+    return {
+      headerText: region.innerText.slice(0, 1200),
+      pieces,
+    };
   });
-  const parsed = parseYahooHeader(symbol, text);
+  let parsed = parseYahooPieces(symbol, snapshot.pieces) || parseYahooHeader(symbol, snapshot.headerText);
+  if (!parsed || parsed.extendedPrice === null) {
+    await page.waitForTimeout(2500);
+    snapshot = await page.evaluate(() => {
+      const region =
+        document.querySelector('[data-testid="quote-hdr"], [data-testid="quote-price"]') ||
+        document.body;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const value = (node.textContent || "").replace(/\s+/g, " ").trim();
+          return value ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+        },
+      });
+      const pieces = [];
+      while (walker.nextNode()) {
+        const value = (walker.currentNode.textContent || "").replace(/\s+/g, " ").trim();
+        if (value && value.length <= 120) {
+          pieces.push(value);
+        }
+        if (pieces.length >= 500) {
+          break;
+        }
+      }
+      return {
+        headerText: region.innerText.slice(0, 1500),
+        pieces,
+      };
+    });
+    parsed = parseYahooPieces(symbol, snapshot.pieces) || parseYahooHeader(symbol, snapshot.headerText);
+  }
   if (!parsed) process.exit(2);
   console.log(JSON.stringify(parsed));
   await page.close();

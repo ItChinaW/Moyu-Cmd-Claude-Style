@@ -365,10 +365,20 @@ pub fn save_watchlist(items: Vec<StockWatchItem>) -> Result<()> {
 }
 
 pub fn add_watch(code: &str) -> Result<Vec<StockWatchItem>> {
-    let code = normalize_code(code);
+    add_watch_many(&[code.to_string()])
+}
+
+pub fn add_watch_many(codes: &[String]) -> Result<Vec<StockWatchItem>> {
     let mut items = load_watchlist()?;
-    if !items.iter().any(|i| normalize_code(&i.code) == code) {
-        items.push(StockWatchItem { code, name: String::new() });
+    let mut changed = false;
+    for code in codes {
+        let code = normalize_code(code);
+        if !items.iter().any(|i| normalize_code(&i.code) == code) {
+            items.push(StockWatchItem { code, name: String::new() });
+            changed = true;
+        }
+    }
+    if changed {
         save_watchlist(items.clone())?;
     }
     Ok(items)

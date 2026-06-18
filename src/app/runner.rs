@@ -28,7 +28,7 @@ pub enum Request {
     /// Zhihu-only: comments for an answer id.
     Comments(String),
     StockList { force: bool },
-    StockAdd(String),
+    StockAdd(Vec<String>),
     StockDelete(String),
     FetchImages { answer_id: String, urls: Vec<String> },
 }
@@ -108,7 +108,7 @@ async fn handle(src: &mut Sources, req: Request) -> Update {
             None => Update::Error("未登录知乎".into()),
         },
         Request::StockList { force } => load_stock_list(src, force).await,
-        Request::StockAdd(code) => match crate::platform::stock::add_watch(&code) {
+        Request::StockAdd(codes) => match crate::platform::stock::add_watch_many(&codes) {
             Ok(_) => Update::StockChanged,
             Err(e) => Update::Error(e.to_string()),
         },
@@ -672,8 +672,17 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
             let _ = req_tx.send(Request::Search(q));
         }
         Command::Add(code) => {
-            app.loading = true;
-            let _ = req_tx.send(Request::StockAdd(code));
+            let codes = code
+                .split_whitespace()
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if codes.is_empty() {
+                app.error = Some("请至少输入一个股票代码".into());
+            } else {
+                app.loading = true;
+                let _ = req_tx.send(Request::StockAdd(codes));
+            }
         }
         Command::Delete(code) => {
             app.loading = true;
