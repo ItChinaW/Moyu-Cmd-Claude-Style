@@ -342,6 +342,10 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
     Ok(quotes)
 }
 
+pub async fn fetch_quote(http: &HttpClient, item: &StockWatchItem, force: bool) -> Result<Option<QuoteItem>> {
+    Ok(fetch_quotes(http, std::slice::from_ref(item), force).await?.into_iter().next())
+}
+
 async fn fetch_yahoo_index(http: &HttpClient, label: &str, symbol: &str) -> Result<Option<MarketIndexItem>> {
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
@@ -369,35 +373,31 @@ async fn fetch_yahoo_index(http: &HttpClient, label: &str, symbol: &str) -> Resu
     }))
 }
 
-pub async fn fetch_market_indices(http: &HttpClient) -> Result<Vec<MarketIndexItem>> {
-    let mut out = Vec::new();
+pub fn market_index_count() -> usize {
+    SINA_INDICES.len() + YAHOO_INDICES.len()
+}
 
-    let sina_symbols = SINA_INDICES.iter().map(|(_, symbol)| *symbol).collect::<Vec<_>>().join(",");
-    let url = format!("https://hq.sinajs.cn/list={sina_symbols}");
-    let bytes = http
-        .get_bytes(&url, &[("referer", SINA_REFERER), ("user-agent", crate::net::USER_AGENT)])
-        .await?;
-    let (text, _, _) = encoding_rs::GBK.decode(&bytes);
-    for (idx, line) in text.lines().enumerate() {
-        let Some((label, symbol)) = SINA_INDICES.get(idx).copied() else { continue };
-        if let Some(q) = parse_sina_line(symbol, line) {
-            out.push(MarketIndexItem {
-                label: label.to_string(),
-                symbol: symbol.to_string(),
-                price: q.price,
-                change: q.change,
-                change_percent: q.change_percent,
-            });
-        }
+pub async fn fetch_market_index(http: &HttpClient, index: usize) -> Result<Option<MarketIndexItem>> {
+    if let Some((label, symbol)) = SINA_INDICES.get(index).copied() {
+        let url = format!("https://hq.sinajs.cn/list={symbol}");
+        let bytes = http
+            .get_bytes(&url, &[("referer", SINA_REFERER), ("user-agent", crate::net::USER_AGENT)])
+            .await?;
+        let (text, _, _) = encoding_rs::GBK.decode(&bytes);
+        let Some(line) = text.lines().next() else { return Ok(None); };
+        let Some(q) = parse_sina_line(symbol, line) else { return Ok(None); };
+        return Ok(Some(MarketIndexItem {
+            label: label.to_string(),
+            symbol: symbol.to_string(),
+            price: q.price,
+            change: q.change,
+            change_percent: q.change_percent,
+        }));
     }
 
-    for (label, symbol) in YAHOO_INDICES {
-        if let Some(item) = fetch_yahoo_index(http, label, symbol).await? {
-            out.push(item);
-        }
-    }
-
-    Ok(out)
+    let offset = index.saturating_sub(SINA_INDICES.len());
+    let Some((label, symbol)) = YAHOO_INDICES.get(offset).copied() else { return Ok(None); };
+    fetch_yahoo_index(http, label, symbol).await
 }
 
 fn fmt_pct(pct: f64) -> String {

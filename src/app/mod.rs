@@ -119,6 +119,30 @@ impl App {
         self.list_cursor = 0;
     }
 
+    pub fn prepare_stream_list(&mut self, count: usize) {
+        self.list = (0..count)
+            .map(|_| ListEntry {
+                title: "加载中...".into(),
+                subtitle: String::new(),
+                open_token: None,
+                detail: None,
+            })
+            .collect();
+        self.list_cursor = 0;
+    }
+
+    pub fn set_list_entry(&mut self, index: usize, entry: ListEntry) {
+        if index >= self.list.len() {
+            self.list.resize_with(index + 1, || ListEntry {
+                title: "加载中...".into(),
+                subtitle: String::new(),
+                open_token: None,
+                detail: None,
+            });
+        }
+        self.list[index] = entry;
+    }
+
     /// "Load more": append rows not yet seen this session onto the current list,
     /// leaving the cursor where it is. Used by forum boards (NGA, …) whose hot/
     /// active feeds re-sort each request — replacing the list would shrink it to
