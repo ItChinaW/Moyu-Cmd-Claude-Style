@@ -848,8 +848,8 @@ mod tests {
         dispatch_command(&mut app, Command::Stock, &tx);
         assert_eq!(app.active_platform, Platform::Stock);
         match rx.try_recv() {
-            Ok(Request::List(Platform::Stock)) => {}
-            other => panic!("expected List(Stock), got {:?}", other),
+            Ok(Request::StockList { force: false }) => {}
+            other => panic!("expected StockList {{ force: false }}, got {:?}", other),
         }
     }
 
@@ -930,8 +930,8 @@ mod tests {
         let (tx, mut rx) = make_channel();
         handle_key(&mut app, KeyCode::Char('r'), &tx);
         match rx.try_recv() {
-            Ok(Request::List(Platform::Stock)) => {}
-            other => panic!("expected List(Stock) refresh, got {:?}", other),
+            Ok(Request::StockList { force: true }) => {}
+            other => panic!("expected StockList {{ force: true }} refresh, got {:?}", other),
         }
     }
 

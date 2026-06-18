@@ -455,8 +455,8 @@ mod tests {
 
     #[test]
     fn finds_scrape_script_from_repo_root() {
-        let root = std::path::Path::new("/Users/wangkai/Desktop/项目/study/rust/toush-fish");
-        let found = find_scrape_script(Some(root), None).expect("script should exist under npm/");
+        let root = std::env::current_dir().unwrap();
+        let found = find_scrape_script(Some(&root), None).expect("script should exist under npm/");
         assert!(found.ends_with("npm/yahoo_quote_scrape.mjs"));
     }
 }
