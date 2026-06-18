@@ -119,9 +119,8 @@ fn draw_stock_list(f: &mut Frame, area: Rect, app: &App) {
             Line::from("  /add 159941    添加 A 股"),
             Line::from("  /add SPCX      添加美股"),
             Line::from("  /delete SPCX   删除自选"),
-            Line::from("  r              刷新行情"),
             Line::from(""),
-            Line::from(Span::styled("一行两列展示，自选数据保存在本地 config.toml。", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled("一行两列展示，列表会通过 WS 自动实时更新。", Style::default().fg(Color::DarkGray))),
         ];
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
         return;
@@ -146,19 +145,8 @@ fn render_stock_cell(app: &App, idx: usize, width: usize) -> (String, String) {
     };
     let selected = idx == app.list_cursor();
     let marker = if selected { "> " } else { "  " };
-    let spinner = match app.spinner_phase % 4 {
-        0 => "|",
-        1 => "/",
-        2 => "-",
-        _ => "\\",
-    };
-    let loading = if app.stock_refreshing.contains(&idx) {
-        format!(" {spinner}")
-    } else {
-        String::new()
-    };
     let title_w = width.saturating_sub(marker.len());
-    let line1 = pad_to_width(&format!("{marker}{}{}", item.title, loading), width);
+    let line1 = pad_to_width(&format!("{marker}{}", item.title), width);
     let line2 = pad_to_width(&format!("  {}", item.subtitle), title_w + 2);
     (line1, line2)
 }
@@ -448,7 +436,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
         Line::from(vec![
             Span::styled("股票 · ", Style::default().fg(Color::DarkGray)),
             Span::raw(format!("> {}", app.command)),
-            Span::styled("   r刷新  /add 代码  /delete 代码  `老板键", Style::default().fg(Color::DarkGray)),
+            Span::styled("   /add 代码  /delete 代码  `老板键", Style::default().fg(Color::DarkGray)),
         ])
     } else if app.camouflage {
         Line::from(format!("> {}", app.command))
@@ -485,7 +473,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("/delete 代码", "删除自选,如 /delete 159941"),
         kv("/hot", "热榜"),
         kv("/search 词", "搜索"),
-        kv("/refresh", "刷新当前列表(股票为强制刷新,也可按 r)"),
+        kv("/refresh", "刷新当前列表"),
         kv("/login", "重新登录 / 切换账号(粘贴新 Cookie)"),
         kv("/help", "显示本帮助(/? 亦可)"),
         kv("/back", "返回上一级"),
@@ -499,7 +487,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("n / p", "上 / 下一个回答(详情页)"),
         kv("1-9", "在编辑器打开第 N 张图(详情页)"),
         kv("c", "开关 Claude 伪装(详情页)"),
-        kv("r", "刷新(列表页; 股票为强制刷新)"),
+        kv("r", "刷新(列表页)"),
         kv("q", "退出"),
         kv("` 或 ·", "老板键:一键隐藏 / 恢复(中英文输入法都可)"),
         Line::from(""),

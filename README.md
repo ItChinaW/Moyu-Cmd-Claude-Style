@@ -17,7 +17,7 @@ npm install -g moyu-fish
 moyu
 ```
 
-安装 npm 包时不会预先下载股票夜盘抓取依赖；首次进入股票模块并触发夜盘抓取时，程序会按需准备 Playwright Chromium。一般不需要用户自己额外安装 Chrome 浏览器。
+安装 npm 包时不会预先下载股票扩展时段抓取依赖；首次进入股票模块并触发美股扩展时段抓取时，程序会优先尝试本地 Python `yfinance` WebSocket 子进程，失败后再回退到现有 Yahoo 方案。
 
 ## 使用
 
@@ -84,6 +84,13 @@ watchlist = [
   { code = "SPCX", name = "SPCX" },
 ]
 ```
+
+美股扩展时段优先尝试本地 Python `yfinance` WebSocket 子进程。你需要有:
+
+- `python3`
+- 并可安装 `py/requirements.txt` 中的依赖 (`yfinance`)
+
+如果本地没有 `yfinance`、或 WebSocket 失败,程序会自动回退到现有 Yahoo 方案。
 
 ## 实现说明
 

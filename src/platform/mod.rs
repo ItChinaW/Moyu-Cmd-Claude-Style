@@ -5,6 +5,7 @@ pub mod hupu;
 pub mod nga;
 pub mod linuxdo;
 pub mod stock;
+pub mod yahoo_ws;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform { Zhihu, V2ex, Hupu, Nga, LinuxDo, Stock }

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::process::Command;
 
 use crate::config::{Config, StockWatchItem};
@@ -33,6 +34,24 @@ struct ScrapeQuote {
     extended_price: Option<f64>,
     #[serde(rename = "extendedChangePercent")]
     extended_change_percent: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooStreamResponse {
+    quotes: Vec<YahooStreamQuote>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooStreamQuote {
+    symbol: String,
+    #[serde(default)]
+    price: Option<f64>,
+    #[serde(rename = "changePercent", default)]
+    change_percent: Option<f64>,
+    #[serde(default)]
+    change: Option<f64>,
+    #[serde(rename = "previousClose", default)]
+    previous_close: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +260,45 @@ fn find_scrape_script(base_dir: Option<&std::path::Path>, exe_dir: Option<&std::
     candidates.into_iter().flatten().find(|p| p.exists())
 }
 
+fn find_python_stream_script(base_dir: Option<&std::path::Path>, exe_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let candidates = [
+        base_dir.map(|d| d.join("py/yahoo_stream.py")),
+        exe_dir.map(|d| d.join("../yahoo_stream.py")),
+        exe_dir.map(|d| d.join("../../py/yahoo_stream.py")),
+        exe_dir.map(|d| d.join("../../../py/yahoo_stream.py")),
+    ];
+    candidates.into_iter().flatten().find(|p| p.exists())
+}
+
+fn fetch_us_yfinance_stream(symbols: &[String]) -> Option<HashMap<String, (f64, f64, f64)>> {
+    if symbols.is_empty() {
+        return Some(HashMap::new());
+    }
+    let exe = std::env::current_exe().ok()?;
+    let cwd = std::env::current_dir().ok();
+    let script = find_python_stream_script(cwd.as_deref(), exe.parent())?;
+    let out = Command::new("python3")
+        .arg(script)
+        .args(symbols)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let parsed: YahooStreamResponse = serde_json::from_slice(&out.stdout).ok()?;
+    let mut map = HashMap::new();
+    for quote in parsed.quotes {
+        let Some(price) = quote.price else { continue };
+        let Some(change_percent) = quote.change_percent else { continue };
+        let previous_close = quote.previous_close.unwrap_or_else(|| {
+            let change = quote.change.unwrap_or(0.0);
+            price - change
+        });
+        map.insert(quote.symbol.to_uppercase(), (price, change_percent, previous_close));
+    }
+    Some(map)
+}
+
 pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bool) -> Result<Vec<QuoteItem>> {
     if items.is_empty() {
         return Ok(Vec::new());
@@ -253,11 +311,23 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
         .await?;
     let (text, _, _) = encoding_rs::GBK.decode(&bytes);
     let mut quotes = Vec::new();
+    let us_symbols = symbols
+        .iter()
+        .filter(|code| Market::detect(code) == Market::Us)
+        .cloned()
+        .collect::<Vec<_>>();
+    let ystream = fetch_us_yfinance_stream(&us_symbols).unwrap_or_default();
     for (idx, line) in text.lines().enumerate() {
         let Some(code) = symbols.get(idx) else { continue };
         if let Some(mut q) = parse_sina_line(code, line) {
             if Market::detect(code) == Market::Us {
-                if let Some(scraped) = fetch_us_playwright(code) {
+                if let Some((stream_price, stream_pct, stream_prev_close)) = ystream.get(code) {
+                    q.price = *stream_price;
+                    q.change_percent = *stream_pct;
+                    q.previous_close = *stream_prev_close;
+                    q.change = q.price - q.previous_close;
+                    q.extended_source_ready = true;
+                } else if let Some(scraped) = fetch_us_playwright(code) {
                     q.price = scraped.price;
                     q.change = scraped.change;
                     q.change_percent = scraped.change_percent;
@@ -290,10 +360,6 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
         }
     }
     Ok(quotes)
-}
-
-pub async fn fetch_quote(http: &HttpClient, item: &StockWatchItem, force: bool) -> Result<Option<QuoteItem>> {
-    Ok(fetch_quotes(http, std::slice::from_ref(item), force).await?.into_iter().next())
 }
 
 fn fmt_pct(pct: f64) -> String {

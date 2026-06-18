@@ -3,7 +3,8 @@ pub mod command;
 pub mod runner;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
-use std::collections::{HashSet, BTreeSet};
+use crate::platform::stock::QuoteItem;
+use std::collections::HashSet;
 
 /// Dedup key for a recommend row — answer id if known (each card is one answer),
 /// else question id, else the title.
@@ -26,14 +27,10 @@ pub enum ListSource {
     Search(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StockView {
-    Watchlist,
-}
-
 pub struct App {
     stack: Vec<Screen>,
     pub list: Vec<ListEntry>,
+    pub stock_quotes: Vec<QuoteItem>,
     list_cursor: usize,
     pub details: Vec<DetailView>,
     pub detail_idx: usize,
@@ -63,17 +60,13 @@ pub struct App {
     pub pending_login_platform: Option<crate::platform::Platform>,
     /// Cursor on the Root platform picker (index into `Platform::ALL`).
     pub root_cursor: usize,
-    pub stock_force_refresh: bool,
-    pub stock_view: StockView,
-    pub stock_refreshing: BTreeSet<usize>,
-    pub spinner_phase: usize,
 }
 
 impl App {
     pub fn new() -> Self {
         Self {
             stack: vec![Screen::Root],
-            list: Vec::new(), list_cursor: 0,
+            list: Vec::new(), stock_quotes: Vec::new(), list_cursor: 0,
             details: Vec::new(), detail_idx: 0, detail_scroll: 0,
             comments: Vec::new(), comment_scroll: 0,
             command: String::new(), loading: false, error: None,
@@ -87,10 +80,6 @@ impl App {
             active_platform: crate::platform::Platform::Zhihu,
             pending_login_platform: None,
             root_cursor: 0,
-            stock_force_refresh: false,
-            stock_view: StockView::Watchlist,
-            stock_refreshing: BTreeSet::new(),
-            spinner_phase: 0,
         }
     }
 
@@ -122,28 +111,29 @@ impl App {
         self.list_cursor = 0;
     }
 
-    pub fn prepare_stream_list(&mut self, count: usize) {
-        self.list = (0..count)
-            .map(|_| ListEntry {
-                title: "加载中...".into(),
-                subtitle: String::new(),
-                open_token: None,
-                detail: None,
-            })
+    pub fn replace_stock_quotes(&mut self, items: Vec<QuoteItem>) {
+        self.stock_quotes = items;
+        self.list = self
+            .stock_quotes
+            .iter()
+            .map(crate::platform::stock::quote_to_entry)
             .collect();
         self.list_cursor = 0;
     }
 
-    pub fn set_list_entry(&mut self, index: usize, entry: ListEntry) {
-        if index >= self.list.len() {
-            self.list.resize_with(index + 1, || ListEntry {
-                title: "加载中...".into(),
-                subtitle: String::new(),
-                open_token: None,
-                detail: None,
-            });
+    pub fn update_stock_quote_live(&mut self, symbol: &str, price: f64, change_percent: f64, change: f64) {
+        if let Some((idx, quote)) = self
+            .stock_quotes
+            .iter_mut()
+            .enumerate()
+            .find(|(_, q)| q.symbol == symbol)
+        {
+            quote.extended_price = Some(price);
+            quote.extended_change_percent = Some(change_percent);
+            quote.extended_source_ready = true;
+            quote.change = change;
+            self.list[idx] = crate::platform::stock::quote_to_entry(quote);
         }
-        self.list[index] = entry;
     }
 
     /// "Load more": append rows not yet seen this session onto the current list,
@@ -170,6 +160,7 @@ impl App {
             self.active_platform = p;
             self.seen.clear();
             self.list.clear();
+            self.stock_quotes.clear();
             self.list_cursor = 0;
         }
     }
