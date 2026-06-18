@@ -1,7 +1,4 @@
-use anyhow::{Context, Result};
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::process::Command;
+use anyhow::Result;
 
 use crate::config::{Config, StockWatchItem};
 use crate::net::HttpClient;
@@ -20,38 +17,6 @@ pub struct QuoteItem {
     pub extended_price: Option<f64>,
     pub extended_change_percent: Option<f64>,
     pub extended_source_ready: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct ScrapeQuote {
-    price: f64,
-    change: f64,
-    #[serde(rename = "changePercent")]
-    change_percent: f64,
-    #[serde(rename = "previousClose")]
-    previous_close: f64,
-    #[serde(rename = "extendedPrice")]
-    extended_price: Option<f64>,
-    #[serde(rename = "extendedChangePercent")]
-    extended_change_percent: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooStreamResponse {
-    quotes: Vec<YahooStreamQuote>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooStreamQuote {
-    symbol: String,
-    #[serde(default)]
-    price: Option<f64>,
-    #[serde(rename = "changePercent", default)]
-    change_percent: Option<f64>,
-    #[serde(default)]
-    change: Option<f64>,
-    #[serde(rename = "previousClose", default)]
-    previous_close: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,154 +117,7 @@ fn parse_sina_line(raw_symbol: &str, line: &str) -> Option<QuoteItem> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct YahooChartResponse {
-    chart: YahooChart,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooChart {
-    result: Option<Vec<YahooChartResult>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooChartResult {
-    meta: YahooMeta,
-    timestamp: Option<Vec<i64>>,
-    indicators: YahooIndicators,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooMeta {
-    #[serde(rename = "regularMarketPrice")]
-    regular_market_price: f64,
-    #[serde(rename = "currentTradingPeriod")]
-    current_trading_period: Option<YahooTradingPeriod>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooTradingPeriod {
-    pre: Option<YahooPeriod>,
-    regular: Option<YahooPeriod>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooPeriod {
-    start: i64,
-    end: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooIndicators {
-    quote: Vec<YahooQuoteSet>,
-}
-
-#[derive(Debug, Deserialize)]
-struct YahooQuoteSet {
-    close: Vec<Option<f64>>,
-}
-
-async fn fetch_us_extended(http: &HttpClient, symbol: &str) -> Result<Option<(f64, f64)>> {
-    let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d&includePrePost=true",
-        urlencoding::encode(symbol)
-    );
-    let text = http.get_text(
-        &url,
-        &[("accept", "application/json"), ("user-agent", crate::net::USER_AGENT)],
-    ).await?;
-    let parsed: YahooChartResponse = serde_json::from_str(&text).context("parse yahoo chart json")?;
-    let Some(result) = parsed.chart.result.and_then(|mut v| v.drain(..).next()) else { return Ok(None); };
-    let regular = result.meta.regular_market_price;
-    if regular <= 0.0 {
-        return Ok(None);
-    }
-    let ts = result.timestamp.unwrap_or_default();
-    let closes = result.indicators.quote.first().map(|q| q.close.as_slice()).unwrap_or(&[]);
-    let periods = result.meta.current_trading_period;
-    let pre_start = periods.as_ref().and_then(|p| p.pre.as_ref().map(|x| x.start));
-    let reg_start = periods.as_ref().and_then(|p| p.regular.as_ref().map(|x| x.start));
-    let reg_end = periods.as_ref().and_then(|p| p.regular.as_ref().map(|x| x.end));
-    if pre_start.is_none() || reg_start.is_none() || reg_end.is_none() {
-        return Ok(None);
-    }
-    for idx in (0..ts.len()).rev() {
-        let Some(close) = closes.get(idx).and_then(|v| *v) else { continue };
-        let t = ts[idx];
-        let session_hit = t < pre_start.unwrap() || t < reg_start.unwrap() || t >= reg_end.unwrap();
-        if session_hit && (close - regular).abs() > f64::EPSILON {
-            let pct = (close - regular) / regular * 100.0;
-            return Ok(Some((close, pct)));
-        }
-    }
-    Ok(None)
-}
-
-fn fetch_us_playwright(symbol: &str) -> Option<ScrapeQuote> {
-    let exe = std::env::current_exe().ok()?;
-    let cwd = std::env::current_dir().ok();
-    let script = find_scrape_script(cwd.as_deref(), exe.parent())?;
-    let out = Command::new("node")
-        .arg(script)
-        .arg(symbol)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    serde_json::from_slice(&out.stdout).ok()
-}
-
-fn find_scrape_script(base_dir: Option<&std::path::Path>, exe_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-    let candidates = [
-        base_dir.map(|d| d.join("npm/yahoo_quote_scrape.mjs")),
-        exe_dir.map(|d| d.join("../yahoo_quote_scrape.mjs")),
-        exe_dir.map(|d| d.join("../../npm/yahoo_quote_scrape.mjs")),
-        exe_dir.map(|d| d.join("../../../npm/yahoo_quote_scrape.mjs")),
-    ];
-    candidates.into_iter().flatten().find(|p| p.exists())
-}
-
-fn find_python_stream_script(base_dir: Option<&std::path::Path>, exe_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-    let candidates = [
-        base_dir.map(|d| d.join("py/yahoo_stream.py")),
-        exe_dir.map(|d| d.join("../yahoo_stream.py")),
-        exe_dir.map(|d| d.join("../../py/yahoo_stream.py")),
-        exe_dir.map(|d| d.join("../../../py/yahoo_stream.py")),
-    ];
-    candidates.into_iter().flatten().find(|p| p.exists())
-}
-
-fn fetch_us_yfinance_stream(symbols: &[String]) -> Option<HashMap<String, (f64, f64, f64)>> {
-    if symbols.is_empty() {
-        return Some(HashMap::new());
-    }
-    let exe = std::env::current_exe().ok()?;
-    let cwd = std::env::current_dir().ok();
-    let script = find_python_stream_script(cwd.as_deref(), exe.parent())?;
-    let out = Command::new("python3")
-        .arg(script)
-        .args(symbols)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let parsed: YahooStreamResponse = serde_json::from_slice(&out.stdout).ok()?;
-    let mut map = HashMap::new();
-    for quote in parsed.quotes {
-        let Some(price) = quote.price else { continue };
-        let Some(change_percent) = quote.change_percent else { continue };
-        let previous_close = quote.previous_close.unwrap_or_else(|| {
-            let change = quote.change.unwrap_or(0.0);
-            price - change
-        });
-        map.insert(quote.symbol.to_uppercase(), (price, change_percent, previous_close));
-    }
-    Some(map)
-}
-
-pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bool) -> Result<Vec<QuoteItem>> {
+pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], _force: bool) -> Result<Vec<QuoteItem>> {
     if items.is_empty() {
         return Ok(Vec::new());
     }
@@ -311,44 +129,9 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
         .await?;
     let (text, _, _) = encoding_rs::GBK.decode(&bytes);
     let mut quotes = Vec::new();
-    let us_symbols = symbols
-        .iter()
-        .filter(|code| Market::detect(code) == Market::Us)
-        .cloned()
-        .collect::<Vec<_>>();
-    let ystream = fetch_us_yfinance_stream(&us_symbols).unwrap_or_default();
     for (idx, line) in text.lines().enumerate() {
         let Some(code) = symbols.get(idx) else { continue };
         if let Some(mut q) = parse_sina_line(code, line) {
-            if Market::detect(code) == Market::Us {
-                if let Some((stream_price, stream_pct, stream_prev_close)) = ystream.get(code) {
-                    q.price = *stream_price;
-                    q.change_percent = *stream_pct;
-                    q.previous_close = *stream_prev_close;
-                    q.change = q.price - q.previous_close;
-                    q.extended_source_ready = true;
-                } else if let Some(scraped) = fetch_us_playwright(code) {
-                    q.price = scraped.price;
-                    q.change = scraped.change;
-                    q.change_percent = scraped.change_percent;
-                    q.previous_close = scraped.previous_close;
-                    q.extended_price = scraped.extended_price;
-                    q.extended_change_percent = scraped.extended_change_percent;
-                    q.extended_source_ready = true;
-                } else if force {
-                    q.extended_source_ready = false;
-                    if let Ok(Some((ext_price, ext_pct))) = fetch_us_extended(http, code).await {
-                        q.extended_price = Some(ext_price);
-                        q.extended_change_percent = Some(ext_pct);
-                    }
-                } else if let Ok(Some((ext_price, ext_pct))) = fetch_us_extended(http, code).await {
-                    q.extended_source_ready = false;
-                    q.extended_price = Some(ext_price);
-                    q.extended_change_percent = Some(ext_pct);
-                } else {
-                    q.extended_source_ready = false;
-                }
-            }
             if q.name == code.as_str() {
                 if let Some(saved) = items.iter().find(|i| normalize_code(&i.code) == *code) {
                     if !saved.name.is_empty() {
@@ -357,6 +140,18 @@ pub async fn fetch_quotes(http: &HttpClient, items: &[StockWatchItem], force: bo
                 }
             }
             quotes.push(q);
+        } else if Market::detect(code) == Market::Us {
+            quotes.push(QuoteItem {
+                symbol: code.clone(),
+                name: code.clone(),
+                price: 0.0,
+                change: 0.0,
+                change_percent: 0.0,
+                previous_close: 0.0,
+                extended_price: None,
+                extended_change_percent: None,
+                extended_source_ready: false,
+            });
         }
     }
     Ok(quotes)
@@ -374,6 +169,20 @@ pub fn quote_to_entry(q: &QuoteItem) -> ListEntry {
     let title = match Market::detect(&q.symbol) {
         Market::AShare => format!("{}（{}）{} 【{}】", q.name, q.symbol, fmt_price(q.price), fmt_pct(q.change_percent)),
         Market::Us => {
+            if q.price <= 0.0 && q.extended_price.is_none() {
+                return ListEntry {
+                    title: q.symbol.clone(),
+                    subtitle: "等待 WS 数据...".into(),
+                    open_token: Some(q.symbol.clone()),
+                    detail: Some(DetailView {
+                        author: String::new(),
+                        voteup: 0,
+                        body: format!("{}\n代码: {}\n等待 WS 数据...", q.symbol, q.symbol),
+                        images: Vec::new(),
+                        answer_id: q.symbol.clone(),
+                    }),
+                };
+            }
             let ext = q.extended_price.unwrap_or(q.price);
             let ext_pct = q.extended_change_percent.unwrap_or(q.change_percent);
             format!(
@@ -528,12 +337,5 @@ mod tests {
         };
         assert!(quote_to_entry(&us).title.contains("SPCX (191.450 -0.20%) 191.820 【-4.95%】"));
 
-    }
-
-    #[test]
-    fn finds_scrape_script_from_repo_root() {
-        let root = std::env::current_dir().unwrap();
-        let found = find_scrape_script(Some(&root), None).expect("script should exist under npm/");
-        assert!(found.ends_with("npm/yahoo_quote_scrape.mjs"));
     }
 }
