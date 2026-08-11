@@ -6,6 +6,10 @@ pub enum Screen {
     Detail,
     Comments,
     Help,
+    BookDirectory,
+    Books,
+    Chapters,
+    Reader,
 }
 
 #[cfg(test)]

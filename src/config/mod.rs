@@ -12,6 +12,8 @@ pub struct Config {
     pub linuxdo: LinuxDoConfig,
     #[serde(default)]
     pub stock: StockConfig,
+    #[serde(default)]
+    pub books: BooksConfig,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,6 +39,13 @@ pub struct StockWatchItem {
     pub code: String,
     #[serde(default)]
     pub name: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BooksConfig {
+    /// Last selected directory. The first visit asks for this path.
+    #[serde(default)]
+    pub directory: String,
 }
 
 impl Config {
@@ -119,6 +128,16 @@ mod tests {
         cfg.nga.cookie = "n".into();
         cfg.linuxdo.cookie = "l".into();
         cfg.stock.watchlist = vec![StockWatchItem { code: "159941".into(), name: "纳指ETF".into() }];
+        cfg.save_to(&path).unwrap();
+        assert_eq!(cfg, Config::load_from(&path).unwrap());
+    }
+
+    #[test]
+    fn book_directory_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut cfg = Config::default();
+        cfg.books.directory = "/Users/me/Books".into();
         cfg.save_to(&path).unwrap();
         assert_eq!(cfg, Config::load_from(&path).unwrap());
     }

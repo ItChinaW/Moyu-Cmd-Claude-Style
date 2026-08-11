@@ -6,6 +6,22 @@ const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
+// `npm link` development mode: run the current repository rather than the
+// downloaded release binary, so `moyu` and `moyu-test` behave consistently.
+const packageRoot = path.resolve(__dirname, "..");
+const projectRoot = path.resolve(packageRoot, "..");
+if (fs.existsSync(path.join(projectRoot, "Cargo.toml"))) {
+  const result = spawnSync("cargo", ["run", "--bin", "moyu", "--", ...process.argv.slice(2)], {
+    cwd: projectRoot,
+    stdio: "inherit",
+  });
+  if (result.error) {
+    console.error("moyu: 启动 cargo 失败 -", result.error.message);
+    process.exit(1);
+  }
+  process.exit(result.status === null ? 1 : result.status);
+}
+
 const binName = process.platform === "win32" ? "moyu.exe" : "moyu";
 const binPath = path.join(__dirname, binName);
 

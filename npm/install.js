@@ -63,7 +63,7 @@ function download(u, dest, redirects = 0) {
     await download(url, outPath);
     if (!isWin) fs.chmodSync(outPath, 0o755);
     console.log(
-      "moyu: 安装完成,直接运行 `moyu` 即可。\n" +
+      "moyu: 安装完成,可运行 `moyu` 或 `moyu-test`。\n" +
       "股票夜盘抓取依赖会在首次进入股票模块时按需准备。"
     );
   } catch (e) {

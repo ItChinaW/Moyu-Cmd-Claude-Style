@@ -13,9 +13,10 @@ pub fn draw(f: &mut Frame, app: &App) {
         draw_boss(f, f.area());
         return;
     }
+    let footer_height = if *app.screen() == Screen::Reader { 2 } else { 1 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
         .split(f.area());
     match app.screen() {
         Screen::Root => draw_root(f, chunks[0], app),
@@ -24,17 +25,26 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::Detail => draw_detail(f, chunks[0], app),
         Screen::Comments => draw_comments(f, chunks[0], app),
         Screen::Help => draw_help(f, chunks[0]),
+        Screen::BookDirectory => draw_book_directory(f, chunks[0], app),
+        Screen::Books => draw_books(f, chunks[0], app),
+        Screen::Chapters => draw_chapters(f, chunks[0], app),
+        Screen::Reader => draw_reader(f, chunks[0], app),
     }
     draw_command_bar(f, chunks[1], app);
 }
 
 fn draw_root(f: &mut Frame, area: Rect, app: &App) {
     let mut lines = vec![
-        Line::from(Span::styled("选择平台（↑↓ 选择，回车进入）", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled("选择入口（↑↓ 选择，回车进入）", Style::default().fg(Color::DarkGray))),
         Line::from(""),
     ];
+    let selected_books = app.root_is_books();
+    lines.push(Line::from(Span::styled(
+        format!("{}电子书阅读", if selected_books { "> " } else { "  " }),
+        if selected_books { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default() },
+    )));
     for (i, p) in crate::platform::Platform::ALL.iter().enumerate() {
-        let selected = i == app.root_cursor;
+        let selected = i + 1 == app.root_cursor;
         let marker = if selected { "> " } else { "  " };
         let mut label = format!("{marker}{}", p.label());
         if p.needs_cookie() { label.push_str("  (需 cookie)"); }
@@ -46,6 +56,105 @@ fn draw_root(f: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(label, style)));
     }
     f.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_book_directory(f: &mut Frame, area: Rect, app: &App) {
+    let previous = if app.book_directory.is_empty() {
+        "还没有设置过书库目录".to_string()
+    } else {
+        format!("上次书库: {}", app.book_directory)
+    };
+    let lines = vec![
+        Line::from(Span::styled("电子书阅读", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from("请输入电子书所在目录，程序会递归加载常见格式："),
+        Line::from("EPUB · PDF · TXT · Markdown · HTML · DOCX · ODT · RTF · FB2 · MOBI/AZW"),
+        Line::from(""),
+        Line::from(Span::styled(previous, Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(format!("目录 > {}", app.command)),
+        Line::from("回车或 f 弹出系统目录选择器 · Esc 返回 · 也可直接输入路径"),
+    ];
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
+}
+
+fn draw_books(f: &mut Frame, area: Rect, app: &App) {
+    let mut header = vec![Line::from(vec![
+        Span::styled("电子书书架", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" · {}", app.book_directory), Style::default().fg(Color::DarkGray)),
+    ]), Line::from("")];
+    if app.books.is_empty() {
+        header.push(Line::from("没有找到电子书。按 Esc 重新选择目录。"));
+        f.render_widget(Paragraph::new(header), area);
+        return;
+    }
+    let items: Vec<ListItem> = app.books.iter().enumerate().map(|(i, book)| {
+        let selected = i == app.book_cursor();
+        let marker = if selected { "> " } else { "  " };
+        let style = if selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default() };
+        let summary = if let Some(error) = &book.error {
+            format!("     {} · 解析失败: {}", book.format.to_ascii_uppercase(), one_line(error, 60))
+        } else {
+            format!("     {} · {} 章 · {} 字", book.format.to_ascii_uppercase(), book.chapter_count(), book.char_count())
+        };
+        ListItem::new(vec![
+            Line::from(vec![Span::raw(marker), Span::styled(format!("{}. {}", i + 1, book.title), style)]),
+            Line::from(Span::styled(summary, Style::default().fg(Color::DarkGray))),
+        ])
+    }).collect();
+    let mut state = ListState::default();
+    state.select(Some(app.book_cursor()));
+    f.render_widget(Paragraph::new(header), area);
+    let list_area = Rect { x: area.x, y: area.y.saturating_add(2), width: area.width, height: area.height.saturating_sub(2) };
+    f.render_stateful_widget(List::new(items), list_area, &mut state);
+}
+
+fn draw_chapters(f: &mut Frame, area: Rect, app: &App) {
+    let Some(book) = app.current_book() else {
+        f.render_widget(Paragraph::new("没有选中的书籍"), area);
+        return;
+    };
+    let progress = crate::book::load_progress(&book.id);
+    let header = vec![
+        Line::from(Span::styled(format!("《{}》 · 选择章节", book.title), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(format!("共 {} 章 · 默认从上次阅读位置继续", book.chapter_count()), Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+    ];
+    let items: Vec<ListItem> = book.chapters.iter().enumerate().map(|(i, chapter)| {
+        let selected = i == app.chapter_cursor;
+        let marker = if selected { "> " } else { "  " };
+        let resume = if i == progress.chapter { "  · 上次读到这里" } else { "" };
+        let style = if selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default() };
+        ListItem::new(Line::from(vec![
+            Span::raw(marker), Span::styled(format!("{}. {}", i + 1, chapter.title), style),
+            Span::styled(resume, Style::default().fg(Color::Yellow)),
+        ]))
+    }).collect();
+    let mut state = ListState::default();
+    state.select(Some(app.chapter_cursor));
+    f.render_widget(Paragraph::new(header), area);
+    let list_area = Rect { x: area.x, y: area.y.saturating_add(3), width: area.width, height: area.height.saturating_sub(3) };
+    f.render_stateful_widget(List::new(items), list_area, &mut state);
+}
+
+fn draw_reader(f: &mut Frame, area: Rect, app: &App) {
+    let Some(chapter) = app.current_chapter() else {
+        f.render_widget(Paragraph::new("没有可阅读的章节"), area);
+        return;
+    };
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(chapter.title.clone(), Style::default().fg(Color::Yellow))),
+        Line::from(""),
+    ];
+    for (i, paragraph) in chapter.paragraphs.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+            if app.camouflage && i % 7 == 0 { lines.extend(decoy_block(i / 7)); lines.push(Line::from("")); }
+        }
+        lines.push(Line::from(paragraph.clone()));
+    }
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((app.reader_scroll, 0));
+    f.render_widget(p, area);
 }
 
 fn draw_login(f: &mut Frame, area: Rect, app: &App) {
@@ -428,6 +537,36 @@ fn draw_boss(f: &mut Frame, area: Rect) {
 
 /// Low-key bottom prompt — looks like a shell line. All commands/keys live in /help.
 fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
+    if *app.screen() == Screen::Reader {
+        let status = reader_status(app).unwrap_or_else(|| "电子书 · 无阅读状态".into());
+        let hint = if !app.reader_image_input.is_empty() {
+            Span::styled(
+                format!(
+                    "待打开图片 {} · Enter 打开 · Backspace 修改 · Esc 取消并返回",
+                    app.reader_image_input
+                ),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )
+        } else if let Some(error) = &app.error {
+            Span::styled(format!("> {error}"), Style::default().fg(Color::Red))
+        } else {
+            Span::styled(
+                "-/－ 上一章  =/＝/+/＋ 下一章  ↑↓ 滚动  PgUp/PgDn 翻页  Shift+数字 选图片  Enter 打开  Esc 返回",
+                Style::default().fg(Color::DarkGray),
+            )
+        };
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    status,
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(hint),
+            ]),
+            area,
+        );
+        return;
+    }
     let line = if let Some(e) = &app.error {
         Line::from(Span::styled(format!("> {e}"), Style::default().fg(Color::Red)))
     } else if app.loading {
@@ -448,6 +587,27 @@ fn draw_command_bar(f: &mut Frame, area: Rect, app: &App) {
         ])
     };
     f.render_widget(Paragraph::new(line), area);
+}
+
+fn reader_status(app: &App) -> Option<String> {
+    let book = app.current_book()?;
+    let chapter = app.current_chapter()?;
+    let offset = app.reader_offset.min(chapter.char_count());
+    let remaining = chapter.char_count().saturating_sub(offset);
+    let (paragraph, paragraph_offset) = book.position_for_offset(app.reader_chapter, offset);
+    let read = book.read_count(app.reader_chapter, paragraph, paragraph_offset);
+    Some(format!(
+        "《{}》 · 第 {}/{} 章 · 段落 {}/{} · 已读 {} 字 · 本章剩余 {} 字 · 全书 {} 字 · 图片 {} 张",
+        book.title,
+        app.reader_chapter + 1,
+        book.chapter_count(),
+        paragraph + 1,
+        chapter.paragraphs.len(),
+        read,
+        remaining,
+        book.char_count(),
+        chapter.images.len(),
+    ))
 }
 
 /// Full command + keybinding reference, opened with /help.
@@ -475,6 +635,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("/search 词", "搜索"),
         kv("/refresh", "刷新当前列表"),
         kv("/login", "重新登录 / 切换账号(粘贴新 Cookie)"),
+        kv("/books [目录]", "打开电子书书架 / 更换书库目录"),
         kv("/help", "显示本帮助(/? 亦可)"),
         kv("/back", "返回上一级"),
         kv("/quit", "退出"),
@@ -485,8 +646,13 @@ fn draw_help(f: &mut Frame, area: Rect) {
         kv("→ 或 Tab", "看评论(详情页)"),
         kv("← 或 Esc", "返回上一级"),
         kv("n / p", "上 / 下一个回答(详情页)"),
-        kv("1-9", "在编辑器打开第 N 张图(详情页)"),
-        kv("c", "开关 Claude 伪装(详情页)"),
+        kv("Tab / Shift-Tab", "阅读器切换下一章 / 上一章"),
+        kv("Home / End", "跳到本章开头 / 结尾(阅读器)"),
+        kv("- / =", "上一章 / 下一章(+、－、＋、＝亦可)"),
+        kv("PageUp / PageDown", "上 / 下翻页(阅读器)"),
+        kv("Shift+图片序号", "选择阅读器图片，再按 Enter 打开"),
+        kv("1-9", "直接打开第 N 张图(知乎详情页)"),
+        kv("c", "开关 Claude 伪装(详情页 / 阅读器)"),
         kv("r", "刷新(列表页)"),
         kv("q", "退出"),
         kv("` 或 ·", "老板键:一键隐藏 / 恢复(中英文输入法都可)"),

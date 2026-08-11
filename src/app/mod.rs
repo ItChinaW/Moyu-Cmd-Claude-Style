@@ -4,6 +4,7 @@ pub mod runner;
 use state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
 use crate::platform::stock::QuoteItem;
+use crate::book::{Book, ReadingPosition};
 use std::collections::HashSet;
 
 /// Dedup key for a recommend row — answer id if known (each card is one answer),
@@ -58,8 +59,17 @@ pub struct App {
     /// When a cookie-gated platform was requested without a stored cookie, the
     /// platform the pending Login screen should connect once a cookie is entered.
     pub pending_login_platform: Option<crate::platform::Platform>,
-    /// Cursor on the Root platform picker (index into `Platform::ALL`).
+    /// Cursor on the Root picker: 0 is books, platform entries start at 1.
     pub root_cursor: usize,
+    pub book_directory: String,
+    pub books: Vec<Book>,
+    book_cursor: usize,
+    pub selected_book: usize,
+    pub chapter_cursor: usize,
+    pub reader_chapter: usize,
+    pub reader_offset: usize,
+    pub reader_scroll: u16,
+    pub reader_image_input: String,
 }
 
 impl App {
@@ -80,16 +90,26 @@ impl App {
             active_platform: crate::platform::Platform::Zhihu,
             pending_login_platform: None,
             root_cursor: 0,
+            book_directory: String::new(),
+            books: Vec::new(),
+            book_cursor: 0,
+            selected_book: 0,
+            chapter_cursor: 0,
+            reader_chapter: 0,
+            reader_offset: 0,
+            reader_scroll: 0,
+            reader_image_input: String::new(),
         }
     }
 
     /// Platform highlighted on the Root picker.
     pub fn picked_platform(&self) -> crate::platform::Platform {
-        crate::platform::Platform::ALL[self.root_cursor]
+        crate::platform::Platform::ALL[self.root_cursor.saturating_sub(1).min(crate::platform::Platform::ALL.len() - 1)]
     }
+    pub fn root_is_books(&self) -> bool { self.root_cursor == 0 }
     pub fn root_cursor_up(&mut self) { self.root_cursor = self.root_cursor.saturating_sub(1); }
     pub fn root_cursor_down(&mut self) {
-        if self.root_cursor + 1 < crate::platform::Platform::ALL.len() { self.root_cursor += 1; }
+        if self.root_cursor < crate::platform::Platform::ALL.len() { self.root_cursor += 1; }
     }
 
     /// Apply a list batch: drop rows already seen this session, record the rest,
@@ -174,6 +194,31 @@ impl App {
     pub fn cursor_up(&mut self) { self.list_cursor = self.list_cursor.saturating_sub(1); }
     pub fn selected_entry(&self) -> Option<&ListEntry> { self.list.get(self.list_cursor) }
     pub fn current_detail(&self) -> Option<&DetailView> { self.details.get(self.detail_idx) }
+
+    pub fn set_books(&mut self, books: Vec<Book>) {
+        self.books = books;
+        self.book_cursor = 0;
+        self.selected_book = 0;
+        self.chapter_cursor = 0;
+    }
+
+    pub fn book_cursor(&self) -> usize { self.book_cursor }
+    pub fn book_cursor_up(&mut self) { self.book_cursor = self.book_cursor.saturating_sub(1); }
+    pub fn book_cursor_down(&mut self) {
+        if !self.books.is_empty() && self.book_cursor + 1 < self.books.len() { self.book_cursor += 1; }
+    }
+    pub fn current_book(&self) -> Option<&Book> { self.books.get(self.selected_book) }
+    pub fn chapter_cursor_up(&mut self) { self.chapter_cursor = self.chapter_cursor.saturating_sub(1); }
+    pub fn chapter_cursor_down(&mut self) {
+        let chapter_count = self.current_book().map_or(0, |book| book.chapters.len());
+        if self.chapter_cursor + 1 < chapter_count { self.chapter_cursor += 1; }
+    }
+    pub fn current_chapter(&self) -> Option<&crate::book::Chapter> {
+        self.current_book()?.chapters.get(self.reader_chapter)
+    }
+    pub fn reader_position(&self) -> ReadingPosition {
+        ReadingPosition { chapter: self.reader_chapter, offset: self.reader_offset }
+    }
 }
 
 #[cfg(test)]

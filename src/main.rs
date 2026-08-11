@@ -1,4 +1,5 @@
 mod app;
+mod book;
 mod config;
 mod net;
 mod platform;
@@ -9,5 +10,5 @@ use anyhow::Result;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let cfg = config::Config::load()?;
-    app::runner::run_app(cfg.zhihu.cookie).await
+    app::runner::run_app(cfg.zhihu.cookie, cfg.books.directory).await
 }

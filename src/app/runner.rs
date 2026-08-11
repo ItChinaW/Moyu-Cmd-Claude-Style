@@ -4,11 +4,13 @@ use crate::app::command::{self, Command};
 use crate::app::state::Screen;
 use crate::platform::{ListEntry, DetailView, CommentView};
 use crate::platform::yahoo_ws::YahooPricing;
+use crate::book::{self, Book};
 use crate::platform::zhihu::client::ZhihuClient;
 use crate::platform::Platform;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -31,6 +33,7 @@ pub enum Request {
     StockAdd(Vec<String>),
     StockDelete(String),
     FetchImages { answer_id: String, urls: Vec<String> },
+    LoadBooks(PathBuf),
 }
 
 pub enum Update {
@@ -47,6 +50,8 @@ pub enum Update {
     ImagesReady { answer_id: String, paths: Vec<String> },
     StockChanged,
     Error(String),
+    BooksLoaded { directory: String, books: Vec<Book> },
+    BooksFailed(String),
 }
 
 #[derive(Default)]
@@ -128,6 +133,13 @@ async fn handle_single(src: &mut Sources, req: Request) -> Update {
             Update::ImagesReady { answer_id, paths }
         }
         Request::StockList => Update::Error("内部请求分发错误".into()),
+        Request::LoadBooks(directory) => {
+            let directory = directory.canonicalize().unwrap_or(directory);
+            match book::load_directory(&directory) {
+            Ok(books) => Update::BooksLoaded { directory: directory.to_string_lossy().into_owned(), books },
+            Err(error) => Update::BooksFailed(error.to_string()),
+            }
+        }
     }
 }
 
@@ -284,7 +296,7 @@ async fn download_images(client: &crate::net::HttpClient, urls: &[String]) -> Ve
     paths
 }
 
-pub async fn run_app(cookie: String) -> Result<()> {
+pub async fn run_app(cookie: String, book_directory: String) -> Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = crossterm::terminal::disable_raw_mode();
@@ -304,6 +316,7 @@ pub async fn run_app(cookie: String) -> Result<()> {
     // Keep any saved Zhihu cookie for when the user picks Zhihu, but never
     // auto-enter a platform: always land on the Root platform picker.
     app.cookie = cookie;
+    app.book_directory = book_directory;
 
     let mut events = EventStream::new();
     let (live_tx, mut live_rx) = mpsc::unbounded_channel::<Update>();
@@ -315,7 +328,7 @@ pub async fn run_app(cookie: String) -> Result<()> {
             maybe_ev = events.next() => {
                 match maybe_ev {
                     Some(Ok(Event::Key(k))) if k.kind == KeyEventKind::Press => {
-                        handle_key(&mut app, k.code, &req_tx);
+                        handle_key_event(&mut app, k.code, k.modifiers, &req_tx);
                     }
                     Some(Err(e)) => break Err(e.into()),
                     _ => {}
@@ -445,10 +458,35 @@ fn apply_update(app: &mut App, upd: Update, req_tx: &mpsc::UnboundedSender<Reque
         }
         Update::ConnectFailed(e) => { app.error = Some(e); app.replace(Screen::Login); }
         Update::Error(e) => { app.error = Some(e); }
+        Update::BooksLoaded { directory, books } => {
+            app.error = if books.is_empty() {
+                Some("目录中没有找到支持的电子书格式".into())
+            } else { None };
+            app.book_directory = directory.clone();
+            app.set_books(books);
+            let mut cfg = crate::config::Config::load().unwrap_or_default();
+            cfg.books.directory = directory;
+            let _ = cfg.save();
+            if *app.screen() == Screen::BookDirectory { app.replace(Screen::Books); }
+            else if *app.screen() == Screen::Root { app.push(Screen::Books); }
+        }
+        Update::BooksFailed(e) => {
+            app.error = Some(e);
+            app.loading = false;
+        }
     }
 }
 
-fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Request>) {
+fn handle_key_event(
+    app: &mut App,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    req_tx: &mpsc::UnboundedSender<Request>,
+) {
+    if modifiers.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c' | 'C')) {
+        app.should_quit = true;
+        return;
+    }
     // Boss key: the backtick key toggles a fake innocuous screen. Works on every
     // screen and even while typing; while hidden, all other keys are swallowed.
     // Not advertised on-screen. Accepts the Chinese-IME variants too (see is_boss_key).
@@ -463,14 +501,38 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         KeyCode::Char(c) => {
             app.error = None;
             let on_login = *app.screen() == Screen::Login;
-            if on_login || c == '/' || !app.command.is_empty() {
+            let on_book_directory = *app.screen() == Screen::BookDirectory;
+            if on_book_directory && app.command.is_empty() && matches!(c, 'f' | 'o') {
+                if let Some(directory) = choose_directory() {
+                    request_books(app, &directory, req_tx);
+                }
+            } else if on_login || on_book_directory || c == '/' || !app.command.is_empty() {
                 app.command.push(c);
             } else if c == 'q' {
                 app.should_quit = true;
+            } else if *app.screen() == Screen::Reader
+                && reader_image_digit(code, modifiers).is_some()
+            {
+                let digit = reader_image_digit(code, modifiers).unwrap();
+                if digit != '0' || !app.reader_image_input.is_empty() {
+                    app.reader_image_input.push(digit);
+                }
+            } else if *app.screen() == Screen::Reader && matches!(c, '+' | '＋' | '=' | '＝') {
+                app.reader_image_input.clear();
+                switch_reader_chapter(app, 1);
+            } else if *app.screen() == Screen::Reader && matches!(c, '-' | '－') {
+                app.reader_image_input.clear();
+                switch_reader_chapter(app, -1);
+            } else if *app.screen() == Screen::Reader {
+                if c == 'c' {
+                    app.camouflage = !app.camouflage;
+                } else if c == 'r' {
+                    save_reader_progress(app);
+                }
             } else if c == 'r' && *app.screen() == Screen::List && app.active_platform != Platform::Stock {
                 dispatch_command(app, Command::Refresh, req_tx);
             } else if c == 'c'
-                && matches!(app.screen(), Screen::Detail | Screen::List)
+                && matches!(app.screen(), Screen::Detail | Screen::List | Screen::Reader)
             {
                 app.camouflage = !app.camouflage;
             } else if *app.screen() == Screen::Detail {
@@ -488,8 +550,15 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                 }
             }
         }
+        KeyCode::Backspace if *app.screen() == Screen::Reader => {
+            app.reader_image_input.pop();
+        }
         KeyCode::Backspace => { app.command.pop(); }
-        KeyCode::Esc => { app.command.clear(); app.back(); }
+        KeyCode::Esc => {
+            app.command.clear();
+            app.reader_image_input.clear();
+            app.back();
+        }
         KeyCode::Enter => {
             if *app.screen() == Screen::Login {
                 let cookie = std::mem::take(&mut app.command);
@@ -501,12 +570,28 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
                     app.loading = true;
                     let _ = req_tx.send(Request::Connect { platform: p, cookie });
                 }
+            } else if *app.screen() == Screen::BookDirectory {
+                let directory = std::mem::take(&mut app.command);
+                if directory.is_empty() {
+                    if let Some(directory) = choose_directory() {
+                        request_books(app, &directory, req_tx);
+                    }
+                } else {
+                    request_books(app, &expand_path(&directory), req_tx);
+                }
             } else if !app.command.is_empty() {
                 let cmd = command::parse(&std::mem::take(&mut app.command));
                 dispatch_command(app, cmd, req_tx);
             } else if *app.screen() == Screen::Root {
                 // Enter on the platform picker opens the highlighted platform.
-                open_platform(app, app.picked_platform(), req_tx);
+                if app.root_is_books() { open_books(app, None, req_tx); }
+                else { open_platform(app, app.picked_platform(), req_tx); }
+            } else if *app.screen() == Screen::Books {
+                open_book_selection(app);
+            } else if *app.screen() == Screen::Chapters {
+                open_chapter_selection(app);
+            } else if *app.screen() == Screen::Reader {
+                open_selected_book_image(app);
             } else {
                 open_selection(app, req_tx);
             }
@@ -514,18 +599,40 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         KeyCode::Up => match app.screen() {
             Screen::Root => app.root_cursor_up(),
             Screen::List => app.cursor_up(),
+            Screen::Books => app.book_cursor_up(),
+            Screen::Chapters => app.chapter_cursor_up(),
             Screen::Detail => app.detail_scroll = app.detail_scroll.saturating_sub(1),
             Screen::Comments => app.comment_scroll = app.comment_scroll.saturating_sub(1),
+            Screen::Reader => move_reader(app, -1),
             _ => {}
         },
         KeyCode::Down => match app.screen() {
             Screen::Root => app.root_cursor_down(),
             Screen::List => app.cursor_down(),
+            Screen::Books => app.book_cursor_down(),
+            Screen::Chapters => app.chapter_cursor_down(),
             Screen::Detail => app.detail_scroll = app.detail_scroll.saturating_add(1),
             Screen::Comments => app.comment_scroll = app.comment_scroll.saturating_add(1),
+            Screen::Reader => move_reader(app, 1),
             _ => {}
         },
         KeyCode::Left => app.back(),
+        KeyCode::PageUp if *app.screen() == Screen::Reader => page_reader(app, -1),
+        KeyCode::PageDown if *app.screen() == Screen::Reader => page_reader(app, 1),
+        KeyCode::Home if *app.screen() == Screen::Reader => {
+            app.reader_offset = 0;
+            app.reader_scroll = 0;
+            save_reader_progress(app);
+        }
+        KeyCode::End if *app.screen() == Screen::Reader => {
+            if let Some(total) = app.current_chapter().map(|chapter| chapter.char_count()) {
+                app.reader_offset = total;
+                app.reader_scroll = (total / 80).min(u16::MAX as usize) as u16;
+                save_reader_progress(app);
+            }
+        }
+        KeyCode::Tab if *app.screen() == Screen::Reader => switch_reader_chapter(app, 1),
+        KeyCode::BackTab if *app.screen() == Screen::Reader => switch_reader_chapter(app, -1),
         KeyCode::Right | KeyCode::Tab if *app.screen() == Screen::Detail => {
             if app.active_platform == Platform::Stock {
                 return;
@@ -538,6 +645,33 @@ fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Reque
         }
         _ => {}
     }
+}
+
+#[cfg(test)]
+fn handle_key(app: &mut App, code: KeyCode, req_tx: &mpsc::UnboundedSender<Request>) {
+    handle_key_event(app, code, KeyModifiers::NONE, req_tx);
+}
+
+fn reader_image_digit(code: KeyCode, modifiers: KeyModifiers) -> Option<char> {
+    let KeyCode::Char(character) = code else { return None };
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        if let Some(digit) = character.to_digit(10) {
+            return char::from_digit(digit, 10);
+        }
+    }
+    Some(match character {
+        '!' | '！' | '１' => '1',
+        '@' | '＠' | '２' => '2',
+        '#' | '＃' | '３' => '3',
+        '$' | '＄' | '４' => '4',
+        '%' | '％' | '５' => '5',
+        '^' | '＾' | '６' => '6',
+        '&' | '＆' | '７' => '7',
+        '*' | '＊' | '８' => '8',
+        '(' | '（' | '９' => '9',
+        ')' | '）' | '０' => '0',
+        _ => return None,
+    })
 }
 
 /// The boss key is the physical backtick/tilde key (left of `1`). Input methods emit
@@ -670,6 +804,7 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Nga => open_platform(app, Platform::Nga, req_tx),
         Command::LinuxDo => open_platform(app, Platform::LinuxDo, req_tx),
         Command::Stock => open_platform(app, Platform::Stock, req_tx),
+        Command::Books(path) => open_books(app, path.as_deref(), req_tx),
         Command::Hot => {
             if app.cookie.is_empty() {
                 app.replace(Screen::Login);
@@ -741,6 +876,177 @@ fn dispatch_command(app: &mut App, cmd: Command, req_tx: &mpsc::UnboundedSender<
         Command::Quit => app.should_quit = true,
         Command::Unknown(s) => app.error = Some(format!("未知命令: {s}")),
     }
+}
+
+fn expand_path(path: &str) -> PathBuf {
+    if path == "~" { return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path)); }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("~")).join(rest);
+    }
+    PathBuf::from(path)
+}
+
+/// Open the platform's native folder picker and return the selected directory.
+/// The terminal remains usable after the dialog closes; canceling simply keeps
+/// the directory screen unchanged.
+fn choose_directory() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let output = std::process::Command::new("osascript")
+        .args(["-e", "POSIX path of (choose folder with prompt \"选择电子书目录\")"])
+        .output()
+        .ok()?;
+
+    #[cfg(target_os = "windows")]
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "[void][Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){ $d.SelectedPath }",
+        ])
+        .output()
+        .ok()?;
+
+    #[cfg(target_os = "linux")]
+    let output = std::process::Command::new("zenity")
+        .args(["--file-selection", "--directory", "--title=选择电子书目录"])
+        .output()
+        .or_else(|_| {
+            std::process::Command::new("kdialog")
+                .args(["--getexistingdirectory", ".", "选择电子书目录"])
+                .output()
+        })
+        .ok()?;
+
+    if !output.status.success() { return None; }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!selected.is_empty()).then(|| PathBuf::from(selected))
+}
+
+fn request_books(app: &mut App, directory: &Path, req_tx: &mpsc::UnboundedSender<Request>) {
+    app.error = None;
+    app.loading = true;
+    let _ = req_tx.send(Request::LoadBooks(directory.to_path_buf()));
+}
+
+fn open_books(app: &mut App, directory: Option<&str>, req_tx: &mpsc::UnboundedSender<Request>) {
+    if let Some(directory) = directory.filter(|path| !path.trim().is_empty()) {
+        if !matches!(app.screen(), Screen::Books | Screen::BookDirectory) { app.push(Screen::Books); }
+        request_books(app, &expand_path(directory.trim()), req_tx);
+    } else if app.book_directory.trim().is_empty() {
+        app.error = None;
+        app.command.clear();
+        app.push(Screen::BookDirectory);
+    } else {
+        if !matches!(app.screen(), Screen::Books | Screen::BookDirectory) { app.push(Screen::Books); }
+        let directory = expand_path(&app.book_directory);
+        request_books(app, &directory, req_tx);
+    }
+}
+
+fn open_book_selection(app: &mut App) {
+    let Some(index) = app.books.get(app.book_cursor()).map(|_| app.book_cursor()) else { return };
+    let Some((book_id, chapter_count, error)) = app.books.get(index).map(|book| (book.id.clone(), book.chapters.len(), book.error.clone())) else { return };
+    app.selected_book = index;
+    if chapter_count == 0 {
+        app.error = Some(error.unwrap_or_else(|| "这本书没有可显示的章节".into()));
+        return;
+    }
+    let progress = book::load_progress(&book_id);
+    app.chapter_cursor = progress.chapter.min(chapter_count - 1);
+    app.push(Screen::Chapters);
+}
+
+fn open_chapter_selection(app: &mut App) {
+    let Some((book_id, chapter_index, chapter_length)) = app.current_book().and_then(|book| {
+        book.chapters.get(app.chapter_cursor).map(|chapter| (book.id.clone(), app.chapter_cursor, chapter.char_count()))
+    }) else { return };
+    let progress = book::load_progress(&book_id);
+    app.reader_chapter = chapter_index;
+    app.reader_offset = if progress.chapter == app.reader_chapter { progress.offset.min(chapter_length) } else { 0 };
+    app.reader_scroll = (app.reader_offset / 80).min(u16::MAX as usize) as u16;
+    app.reader_image_input.clear();
+    app.error = None;
+    app.push(Screen::Reader);
+    save_reader_progress(app);
+}
+
+fn open_selected_book_image(app: &mut App) {
+    if app.reader_image_input.is_empty() {
+        return;
+    }
+    let requested = app.reader_image_input.parse::<usize>().unwrap_or(0);
+    let (image_count, path) = app.current_chapter().map_or((0, None), |chapter| {
+        (
+            chapter.images.len(),
+            requested
+                .checked_sub(1)
+                .and_then(|index| chapter.images.get(index))
+                .cloned(),
+        )
+    });
+    match path {
+        Some(path) if !path.is_empty() => {
+            app.reader_image_input.clear();
+            app.error = None;
+            open_image(&path);
+        }
+        Some(_) => app.error = Some(format!("图片 {requested} 提取失败")),
+        None => app.error = Some(format!("本章没有图片 {requested}（共 {image_count} 张）")),
+    }
+}
+
+fn save_reader_progress(app: &App) {
+    let position = app.reader_position();
+    if let Some(book_id) = app.current_book().map(|book| book.id.clone()) {
+        let _ = book::save_progress(&book_id, position);
+    }
+}
+
+fn move_reader(app: &mut App, direction: i32) {
+    move_reader_by(app, direction * 400);
+}
+
+fn page_reader(app: &mut App, direction: i32) {
+    const PAGE_CHARS: usize = 1200;
+    const PAGE_LINES: u16 = 20;
+    let Some(total) = app.current_chapter().map(|chapter| chapter.char_count()) else { return };
+    if direction < 0 {
+        app.reader_offset = app.reader_offset.saturating_sub(PAGE_CHARS);
+        app.reader_scroll = app.reader_scroll.saturating_sub(PAGE_LINES);
+    } else {
+        app.reader_offset = app.reader_offset.saturating_add(PAGE_CHARS).min(total);
+        app.reader_scroll = app.reader_scroll.saturating_add(PAGE_LINES);
+    }
+    save_reader_progress(app);
+}
+
+fn move_reader_by(app: &mut App, amount: i32) {
+    let Some(total) = app.current_chapter().map(|chapter| chapter.char_count()) else { return };
+    if amount < 0 {
+        app.reader_offset = app.reader_offset.saturating_sub((-amount) as usize);
+        app.reader_scroll = app.reader_scroll.saturating_sub(4);
+    } else {
+        app.reader_offset = app.reader_offset.saturating_add(amount as usize).min(total);
+        app.reader_scroll = app.reader_scroll.saturating_add(4);
+    }
+    save_reader_progress(app);
+}
+
+fn switch_reader_chapter(app: &mut App, direction: i32) {
+    let Some(chapter_count) = app.current_book().map(|book| book.chapters.len()) else { return };
+    let next = app.reader_chapter as i32 + direction;
+    if next < 0 || next >= chapter_count as i32 {
+        app.error = Some(if direction > 0 { "已经是最后一章" } else { "已经是第一章" }.into());
+        return;
+    }
+    save_reader_progress(app);
+    app.reader_chapter = next as usize;
+    app.chapter_cursor = app.reader_chapter;
+    app.reader_offset = 0;
+    app.reader_scroll = 0;
+    app.reader_image_input.clear();
+    app.error = None;
+    save_reader_progress(app);
 }
 
 #[cfg(test)]
@@ -818,6 +1124,40 @@ mod tests {
         handle_key(&mut app, KeyCode::Char('q'), &tx);
         assert!(!app.should_quit, "q must be swallowed while hidden");
         assert!(app.command.is_empty(), "typing must be swallowed while hidden");
+    }
+
+    #[test]
+    fn ctrl_c_quits_even_in_boss_mode() {
+        let mut app = App::new();
+        app.boss_mode = true;
+        let (tx, _rx) = make_channel();
+        handle_key_event(
+            &mut app,
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+            &tx,
+        );
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn shifted_number_keys_build_image_numbers() {
+        assert_eq!(
+            reader_image_digit(KeyCode::Char('1'), KeyModifiers::SHIFT),
+            Some('1')
+        );
+        assert_eq!(
+            reader_image_digit(KeyCode::Char('!'), KeyModifiers::SHIFT),
+            Some('1')
+        );
+        assert_eq!(
+            reader_image_digit(KeyCode::Char('@'), KeyModifiers::SHIFT),
+            Some('2')
+        );
+        assert_eq!(
+            reader_image_digit(KeyCode::Char('1'), KeyModifiers::NONE),
+            None
+        );
     }
 
     // 1. dispatch_zhihu_with_cookie connects with that cookie

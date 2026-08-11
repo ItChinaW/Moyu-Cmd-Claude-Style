@@ -12,6 +12,7 @@ pub fn parse(line: &str) -> Command {
         "/nga" => Command::Nga,
         "/linuxdo" => Command::LinuxDo,
         "/stock" => Command::Stock,
+        "/books" => Command::Books((!rest.is_empty()).then(|| rest.to_string())),
         "/hot" => Command::Hot,
         "/refresh" => Command::Refresh,
         "/login" => Command::Login,
@@ -33,6 +34,7 @@ pub enum Command {
     Nga,
     LinuxDo,
     Stock,
+    Books(Option<String>),
     Hot,
     Refresh,
     Search(String),
@@ -52,6 +54,8 @@ mod tests {
     #[test]
     fn parses_known_commands() {
         assert_eq!(parse("/zhihu"), Command::Zhihu);
+        assert_eq!(parse("/books"), Command::Books(None));
+        assert_eq!(parse("/books ~/Books"), Command::Books(Some("~/Books".into())));
         assert_eq!(parse("/hot"), Command::Hot);
         assert_eq!(parse("/stock"), Command::Stock);
         assert_eq!(parse("/refresh"), Command::Refresh);

@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/moyu-fish.svg)](https://www.npmjs.com/package/moyu-fish)
 
-在终端(cmd / PowerShell / macOS / Linux)里摸鱼。支持知乎、V2EX、虎扑、NGA、Linux.do、股票自选,统一「列表 → 详情」交互,全程方向键浏览,界面就画在当前终端窗口里。
+在终端(cmd / PowerShell / macOS / Linux)里摸鱼。支持知乎、V2EX、虎扑、NGA、Linux.do、股票自选和本地电子书,统一「列表 → 详情」交互,全程方向键浏览,界面就画在当前终端窗口里。
 
 ## 安装
 
@@ -18,6 +18,18 @@ moyu
 ```
 
 安装 npm 包时不会预先下载股票扩展时段抓取依赖；首次进入股票模块并触发美股扩展时段抓取时，程序会优先尝试本地 Python `yfinance` WebSocket 子进程，失败后再回退到现有 Yahoo 方案。
+
+## 本地调试
+
+在仓库中执行：
+
+```bash
+cd npm
+npm link
+moyu-test
+```
+
+`moyu-test` 会优先运行当前仓库的 `cargo run`，方便调试本地改动；普通 npm 安装环境则回退到已下载的原生程序。
 
 ## 使用
 
@@ -50,7 +62,20 @@ moyu
 | `/nga` | NGA(需 cookie) |
 | `/linuxdo` | Linux.do(需 cookie) |
 | `/stock` | 股票自选(A股/美股) |
+| `/books [目录]` | 打开电子书书架,首次进入时选择目录 |
 | `/quit` / `q` | 退出 |
+
+## 电子书阅读
+
+根屏选择「电子书阅读」后按回车或 `f`，会打开系统目录选择器；也可以直接输入书库目录。程序会递归扫描并缓存目录中的 EPUB、PDF、TXT、Markdown、HTML、DOCX、ODT、RTF、FB2，以及在安装 Calibre 时通过 `ebook-convert` 读取 MOBI/AZW/AZW3。
+
+- 书架中用 `↑↓` 选择书，回车进入章节列表；首次打开默认第一章，之后默认回到上次阅读章节。
+- 章节列表用 `↑↓` 选择，回车开始阅读；阅读器中按 `Tab` / `Shift-Tab` 切换下一章 / 上一章。
+- 阅读位置会按书缓存到系统缓存目录，重新打开时恢复到上次位置；正文顶部显示已读字数、本章剩余字数、当前章节和总章节数。
+- 阅读器底部固定显示书名、章节、段落、已读/剩余/总字数和图片数；`-`/`－` 切换上一章，`=`/`＝`/`+`/`＋` 切换下一章，`PageUp`/`PageDown` 用于翻页。
+- EPUB 内嵌图片显示为 `【图片1】`、`【图片2】`。按住 Shift 输入图片序号（支持多位数，如 `Shift+1`、`Shift+2` 选择图片 12），再按 Enter，复用知乎图片预览逻辑打开。
+- `Ctrl+C` 可在任意页面直接退出程序。
+- 阅读器同样支持 `c` 切换 Claude 风格伪装、`` ` `` 老板键和 `Esc` 返回。
 
 ## 多平台
 
